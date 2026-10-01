@@ -113,6 +113,36 @@ class TokenSet:
 
 
 @dataclass(frozen=True)
+class ControlSession:
+    """Ephemeral credentials for explicit commands; never persisted or displayed."""
+
+    account: TokenSet = field(repr=False)
+    user_token: str = field(repr=False)
+    tuser_id: str = field(repr=False)
+
+    @property
+    def tokens(self) -> TokenSet:
+        return self.account
+
+
+def _climate_metadata(
+    minimum: Any, maximum: Any, step: Any, durations: Any
+) -> tuple[float | None, float | None, float | None, tuple[int, ...]]:
+    low, high, increment = _number(minimum), _number(maximum), _number(step)
+    if low is None or high is None or not 14 <= low < high <= 33:
+        low = high = None
+    if increment not in (0.5, 1.0):
+        increment = None
+    values = durations.split(",") if isinstance(durations, str) else durations
+    allowed: tuple[int, ...] = ()
+    if isinstance(values, (list, tuple)) and values:
+        numbers = [_number(value) for value in values]
+        if all(n is not None and n.is_integer() and 1 <= n <= 60 for n in numbers):
+            allowed = tuple(sorted({int(n) for n in numbers if n is not None}))
+    return low, high, increment, allowed
+
+
+@dataclass(frozen=True)
 class Vehicle:
     """Minimal discovery metadata; raw account/vehicle records are not persisted."""
 
@@ -120,6 +150,10 @@ class Vehicle:
     name: str
     model: str | None
     power_type: int | None
+    min_temperature: float | None = None
+    max_temperature: float | None = None
+    temperature_step: float | None = None
+    allowed_air_durations: tuple[int, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -127,6 +161,10 @@ class Vehicle:
             "name": self.name,
             "model": self.model,
             "power_type": self.power_type,
+            "min_temperature": self.min_temperature,
+            "max_temperature": self.max_temperature,
+            "temperature_step": self.temperature_step,
+            "allowed_air_durations": list(self.allowed_air_durations),
         }
 
     @classmethod
@@ -140,6 +178,12 @@ class Vehicle:
             _text(value.get("name")) or "Vehicle",
             _text(value.get("model")),
             power if isinstance(power, int) and not isinstance(power, bool) else None,
+            *_climate_metadata(
+                value.get("min_temperature"),
+                value.get("max_temperature"),
+                value.get("temperature_step"),
+                value.get("allowed_air_durations"),
+            ),
         )
 
 
@@ -230,6 +274,9 @@ class JaecooApi:
         self._rejected_refresh: TokenSet | None = None
         self._tsp_lock = asyncio.Lock()
         self._user_token: str | None = None
+        self._tuser_id: str | None = None
+        self._tsp_account: TokenSet | None = None
+        self._tsp_login_confirmed = False
         self._vehicles: dict[str, Vehicle] = {}
 
     @property
@@ -313,6 +360,9 @@ class JaecooApi:
         self._tokens = tokens
         self._rejected_refresh = None
         self._user_token = None
+        self._tuser_id = None
+        self._tsp_account = None
+        self._tsp_login_confirmed = False
         if self._on_tokens is not None:
             self._on_tokens(tokens)
         return tokens
@@ -431,22 +481,91 @@ class JaecooApi:
                 name,
                 model,
                 int(power) if power is not None and power.is_integer() else None,
+                *_climate_metadata(
+                    item.get("minTemperature"),
+                    item.get("maxTemperature"),
+                    item.get("temperatureStepLength"),
+                    item.get("maxAirDuration"),
+                ),
             )
         self._vehicles = vehicles
         return list(vehicles.values())
 
-    async def async_realtime(self, vin: str) -> dict[str, Any]:
-        """Read an authorized car's cloud snapshot; sleeping cars are never woken."""
-        if vin not in self._vehicles:
-            raise ApiError("Telemetry is restricted to discovered account vehicles.")
-        await self._ensure_tokens()
+    def get_vehicle(self, vin: str) -> Vehicle:
+        """Return only already-discovered account metadata, without doing I/O."""
+        if not isinstance(vin, str) or vin not in self._vehicles:
+            raise ApiError("Vehicle is not a discovered account vehicle.")
+        return self._vehicles[vin]
+
+    async def _ensure_tsp_login(self) -> TokenSet:
         async with self._tsp_lock:
-            if self._user_token is None:
-                result = await self._account_post("tsp_login", {"channelId": "1"})
-                self._user_token = _text(_payload(result).get("userToken"))
+            tokens = await self._ensure_tokens()
+            if self._user_token is None or self._tsp_account is not tokens:
+                try:
+                    result = await self._post(
+                        "tsp_login",
+                        _bff_headers(
+                            TSP_LOGIN_PATH, self._country_code, tokens.access_token
+                        ),
+                        json={"channelId": "1"},
+                    )
+                except AuthenticationError:
+                    await self._refresh(tokens)
+                    tokens = await self._ensure_tokens()
+                    result = await self._post(
+                        "tsp_login",
+                        _bff_headers(
+                            TSP_LOGIN_PATH, self._country_code, tokens.access_token
+                        ),
+                        json={"channelId": "1"},
+                    )
+                # A concurrent read may have refreshed while this login was in flight.
+                # Do not associate old TSP credentials with a new account session.
+                if self._tokens is not tokens:
+                    raise ApiError(
+                        "Account session changed during vehicle-service login."
+                    )
+                data = _payload(result)
+                self._user_token = _text(data.get("userToken"))
+                identifier = data.get("tUserId")
+                self._tuser_id = (
+                    str(identifier)
+                    if isinstance(identifier, int)
+                    and not isinstance(identifier, bool)
+                    and identifier > 0
+                    else _text(identifier)
+                )
                 if self._user_token is None:
                     raise ApiError("Vehicle-service login did not include a token.")
-            user_token = self._user_token
+                self._tsp_account = tokens
+                code = result.get("code")
+                self._tsp_login_confirmed = (
+                    not isinstance(code, bool) and str(code) in _SUCCESS_CODES
+                )
+            assert self._tsp_account is not None
+            return self._tsp_account
+
+    async def async_control_session(self, vin: str) -> ControlSession:
+        """Obtain cached TSP credentials only for an explicit known-VIN command."""
+        self.get_vehicle(vin)
+        account = await self._ensure_tsp_login()
+        self.get_vehicle(vin)
+        if (
+            not self._tsp_login_confirmed
+            or self._user_token is None
+            or not self._user_token.strip()
+            or self._tuser_id is None
+            or not self._tuser_id.strip()
+        ):
+            raise ApiError("Vehicle-service login did not include control credentials.")
+        return ControlSession(account, self._user_token, self._tuser_id)
+
+    async def async_realtime(self, vin: str) -> dict[str, Any]:
+        """Read an authorized car's cloud snapshot; sleeping cars are never woken."""
+        self.get_vehicle(vin)
+        await self._ensure_tsp_login()
+        assert self._user_token is not None
+        user_token = self._user_token
         ts = int(time.time() * 1000)
         try:
             result = await self._post(
@@ -468,5 +587,8 @@ class JaecooApi:
             # Re-establish TSP auth on a later poll, without retrying this read.
             if self._user_token == user_token:
                 self._user_token = None
+                self._tuser_id = None
+                self._tsp_account = None
+                self._tsp_login_confirmed = False
             raise
         return _payload(result)

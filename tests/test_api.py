@@ -125,7 +125,16 @@ def test_minimal_serialization_and_redacted_token_repr():
     assert "synthetic" not in repr(tokens)
     vehicle = api.Vehicle(VIN, "Test", "J7", 2)
     assert api.Vehicle.from_dict({**vehicle.to_dict(), "ownerEmail": EMAIL}) == vehicle
-    assert set(vehicle.to_dict()) == {"vin", "name", "model", "power_type"}
+    assert set(vehicle.to_dict()) == {
+        "vin",
+        "name",
+        "model",
+        "power_type",
+        "min_temperature",
+        "max_temperature",
+        "temperature_step",
+        "allowed_air_durations",
+    }
     with pytest.raises(api.ApiError):
         api.TokenSet.from_dict({"access_token": PASSWORD * 0})
     with pytest.raises(api.ApiError):
@@ -588,6 +597,7 @@ def test_public_async_surface_is_read_only():
         "async_login",
         "async_list_vehicles",
         "async_realtime",
+        "async_control_session",
     }
     assert set(api.ALLOWED_ROUTES) == {"token", "vehicles", "tsp_login", "realtime"}
 
@@ -605,3 +615,206 @@ def test_block_unknown_route_and_country():
     ):
         with pytest.raises(api.ApiError):
             api.JaecooApi(session, country_code=country)
+
+
+@pytest.mark.parametrize(
+    "minimum,maximum,step,durations,expected",
+    [
+        ("16", "30", "0.5", "5,10,15", (16.0, 30.0, 0.5, (5, 10, 15))),
+        (14, 33, 1, "15,5,15", (14.0, 33.0, 1.0, (5, 15))),
+        (13, 30, 2, "5,61", (None, None, None, ())),
+        (30, 16, None, "5,bad", (None, None, None, ())),
+        (float("nan"), 30, True, "5,", (None, None, None, ())),
+        (16, 30, 1, "1,60", (16.0, 30.0, 1.0, (1, 60))),
+        (16, 30, 1, 15, (16.0, 30.0, 1.0, ())),
+    ],
+)
+def test_discovery_climate_metadata(minimum, maximum, step, durations, expected):
+    obj, _ = client(
+        Response(
+            {
+                "data": [
+                    {
+                        "vin": VIN,
+                        "minTemperature": minimum,
+                        "maxTemperature": maximum,
+                        "temperatureStepLength": step,
+                        "maxAirDuration": durations,
+                        "ownerEmail": EMAIL,
+                        "car_token": "synthetic-secret",
+                    }
+                ]
+            }
+        )
+    )
+    vehicle = run(obj.async_list_vehicles())[0]
+    assert (
+        vehicle.min_temperature,
+        vehicle.max_temperature,
+        vehicle.temperature_step,
+        vehicle.allowed_air_durations,
+    ) == expected
+    assert api.Vehicle.from_dict(vehicle.to_dict()) == vehicle
+    assert "car_token" not in vehicle.to_dict()
+    assert EMAIL not in repr(vehicle)
+
+
+def test_control_session_reuses_realtime_login_and_safe_repr():
+    obj, session = client(
+        Response(VEHICLES),
+        Response(
+            {
+                "code": "000000",
+                "data": {"userToken": "private-tsp", "tUserId": "private-id"},
+            }
+        ),
+        Response({"data": {"soc": 42}}),
+    )
+
+    async def scenario():
+        await obj.async_list_vehicles()
+        assert obj.get_vehicle(VIN).vin == VIN
+        await obj.async_realtime(VIN)
+        control = await obj.async_control_session(VIN)
+        assert control.account is obj.tokens
+        assert control.tokens is control.account
+        assert control.user_token == "private-tsp"
+        assert control.tuser_id == "private-id"
+        assert "private" not in repr(control)
+        assert "synthetic" not in repr(control)
+        assert await obj.async_control_session(VIN) == control
+
+    run(scenario())
+    assert len(session.calls) == 3
+
+
+def test_control_session_unknown_vin_and_missing_id_fail_closed():
+    obj, session = client(Response(VEHICLES), Response(TSP_LOGIN))
+
+    async def scenario():
+        for vin in (VIN, OTHER_VIN, None, []):
+            with pytest.raises(api.ApiError):
+                await obj.async_control_session(vin)
+        assert not session.calls
+        await obj.async_list_vehicles()
+        for _ in range(2):
+            with pytest.raises(api.ApiError):
+                await obj.async_control_session(VIN)
+
+    run(scenario())
+    assert len(session.calls) == 2
+
+
+def test_refresh_invalidates_control_identity(monkeypatch):
+    now = [1000]
+    monkeypatch.setattr(api.time, "time", lambda: now[0])
+    obj, session = client(
+        Response(VEHICLES),
+        Response(
+            {"code": "000000", "data": {"userToken": "first", "tUserId": "first-id"}}
+        ),
+        Response({"access_token": "new-account", "expires_in": 3600}),
+        Response(
+            {"code": "000000", "data": {"userToken": "second", "tUserId": "second-id"}}
+        ),
+        tokens=api.TokenSet("old", "refresh", 1300),
+    )
+
+    async def scenario():
+        await obj.async_list_vehicles()
+        first = await obj.async_control_session(VIN)
+        now[0] = 1300
+        second = await obj.async_control_session(VIN)
+        assert second.account is obj.tokens and second.account is not first.account
+        assert second.user_token == "second" and second.tuser_id == "second-id"
+
+    run(scenario())
+    assert len(session.calls) == 4
+
+
+@pytest.mark.parametrize("identifier,expected", [(12345, "12345"), ("12345", "12345")])
+def test_control_session_numeric_user_id(identifier, expected):
+    obj, session = client(
+        Response(VEHICLES),
+        Response(
+            {
+                "code": "000000",
+                "data": {
+                    "userToken": "private-tsp",
+                    "tUserId": identifier,
+                },
+            }
+        ),
+    )
+
+    async def scenario():
+        await obj.async_list_vehicles()
+        assert (await obj.async_control_session(VIN)).tuser_id == expected
+
+    run(scenario())
+    assert len(session.calls) == 2
+
+
+def test_inflight_tsp_login_cannot_mix_account_sessions():
+    obj, session = client(Response(VEHICLES))
+
+    class ConcurrentRefresh(Response):
+        async def json(self):
+            obj._accept_tokens({"access_token": "concurrently-refreshed"})
+            return {
+                "data": {"userToken": "old-session-tsp", "tUserId": "old-session-id"}
+            }
+
+    session.responses.extend(
+        [
+            ConcurrentRefresh(),
+            Response(
+                {
+                    "code": "000000",
+                    "data": {
+                        "userToken": "new-session-tsp",
+                        "tUserId": "new-session-id",
+                    },
+                }
+            ),
+        ]
+    )
+
+    async def scenario():
+        await obj.async_list_vehicles()
+        with pytest.raises(api.ApiError, match="session changed"):
+            await obj.async_control_session(VIN)
+        assert obj._user_token is None and obj._tuser_id is None
+        control = await obj.async_control_session(VIN)
+        assert control.account is obj.tokens
+        assert control.user_token == "new-session-tsp"
+        assert control.tuser_id == "new-session-id"
+
+    run(scenario())
+    assert len(session.calls) == 3
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"data": {"userToken": "private-tsp", "tUserId": "private-id"}},
+        {"code": "000000", "data": {"userToken": "private-tsp", "tUserId": " "}},
+        {"code": "000000", "data": {"userToken": " ", "tUserId": "private-id"}},
+    ],
+)
+def test_control_login_requires_explicit_success_and_nonblank_credentials(response):
+    obj, session = client(
+        Response(VEHICLES), Response(response), Response({"data": {"soc": 42}})
+    )
+
+    async def scenario():
+        await obj.async_list_vehicles()
+        with pytest.raises(api.ApiError):
+            await obj.async_control_session(VIN)
+        # Control context remains fail-closed, but legacy read behavior is unchanged.
+        assert await obj.async_realtime(VIN) == {"soc": 42}
+        with pytest.raises(api.ApiError):
+            await obj.async_control_session(VIN)
+
+    run(scenario())
+    assert len(session.calls) == 3

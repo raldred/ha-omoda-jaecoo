@@ -7,6 +7,8 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_CONTROL_PIN,
+    CONF_ENABLE_CONTROLS,
+    CONF_PIN_BLOCKED,
     CONF_POLL_INTERVAL,
     CONF_SELECTED_VINS,
     DEFAULT_POLL_INTERVAL,
@@ -20,7 +22,9 @@ async def async_get_config_entry_diagnostics(
     snapshots = (coordinator.data or {}) if coordinator else {}
     return {
         "backend": "EU Omoda / Jaecoo",
-        "read_only": True,
+        "read_only": not bool(entry.options.get(CONF_ENABLE_CONTROLS, False)),
+        "controls_blocked": bool(entry.data.get(CONF_PIN_BLOCKED, False)),
+        "command_confirmation": "REST acceptance only; no terminal acknowledgement",
         "vehicle_count": len(entry.data[CONF_SELECTED_VINS]),
         "poll_interval_minutes": entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL

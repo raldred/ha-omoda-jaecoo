@@ -154,6 +154,46 @@ def test_valid_cached_parked_values_are_not_discarded():
     assert result.freshness() == "unknown"
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("0", False),
+        ("1", True),
+        ("0.0", False),
+        ("2", None),
+        ("nan", None),
+        (None, None),
+        (True, None),
+    ],
+)
+def test_body_state_decoding_is_strict(raw, expected):
+    result = normalize_snapshot(
+        {"doorLock": raw, "frontHVACState": raw, "frontLeftDoor": raw}, NOW
+    )
+    assert result.door_locked is (None if expected is None else not expected)
+    assert result.climate_on is expected
+    assert result.doors["front_left"] is expected
+
+
+def test_cabin_temperature_can_be_negative_but_not_a_sentinel():
+    assert (
+        normalize_snapshot({"inCarTemperature": "-10.5"}, NOW).cabin_temperature
+        == -10.5
+    )
+    assert (
+        normalize_snapshot({"inCarTemperature": "-1000"}, NOW).cabin_temperature is None
+    )
+
+
+def test_empty_frame_does_not_restore_safety_relevant_body_states():
+    previous = normalize_snapshot(
+        {"doorLock": "0", "frontHVACState": "1", "frontLeftDoor": "0"}, NOW
+    )
+    result = normalize_snapshot({}, NOW, previous)
+    assert result.door_locked is None and result.climate_on is None
+    assert result.doors == {}
+
+
 def test_fetch_time_does_not_become_observation_time():
     result = normalize_snapshot({"dumpEnergy": "60"}, NOW)
     assert result.fetched_at == NOW

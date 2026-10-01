@@ -24,13 +24,17 @@ from .api import (
 )
 from .const import (
     CONF_CLEAR_PIN,
+    CONF_CLIMATE_DURATION,
     CONF_CONTROL_PIN,
     CONF_COUNTRY_CODE,
     CONF_EMAIL,
+    CONF_ENABLE_CONTROLS,
+    CONF_PIN_BLOCKED,
     CONF_POLL_INTERVAL,
     CONF_SELECTED_VINS,
     CONF_TOKENS,
     CONF_VEHICLES,
+    DEFAULT_CLIMATE_DURATION,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     MAX_POLL_INTERVAL,
@@ -283,8 +287,10 @@ class OmodaJaecooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data = dict(entry.data)
                 if clear:
                     data.pop(CONF_CONTROL_PIN, None)
+                    data.pop(CONF_PIN_BLOCKED, None)
                 elif pin:
                     data[CONF_CONTROL_PIN] = pin
+                    data.pop(CONF_PIN_BLOCKED, None)
                 return self.async_update_reload_and_abort(
                     entry, data=data, reason="reconfigure_successful"
                 )
@@ -303,7 +309,7 @@ class OmodaJaecooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
-    """Tune passive polling without storing credentials in options."""
+    """Tune polling and explicitly opt into PIN-protected remote commands."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -317,10 +323,32 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                 and MIN_POLL_INTERVAL <= value <= MAX_POLL_INTERVAL
                 and int(value) == value
             ):
-                return self.async_create_entry(
-                    title="", data={CONF_POLL_INTERVAL: int(value)}
+                enabled = user_input.get(CONF_ENABLE_CONTROLS, False)
+                duration = user_input.get(
+                    CONF_CLIMATE_DURATION, DEFAULT_CLIMATE_DURATION
                 )
-            errors[CONF_POLL_INTERVAL] = "invalid_interval"
+                if enabled and not self.config_entry.data.get(CONF_CONTROL_PIN):
+                    errors["base"] = "pin_required"
+                elif enabled and self.config_entry.data.get(CONF_PIN_BLOCKED):
+                    errors["base"] = "pin_blocked"
+                elif (
+                    isinstance(duration, bool)
+                    or not isinstance(duration, (float, int))
+                    or not 1 <= duration <= 60
+                    or int(duration) != duration
+                ):
+                    errors[CONF_CLIMATE_DURATION] = "invalid_duration"
+                else:
+                    return self.async_create_entry(
+                        title="",
+                        data={
+                            CONF_POLL_INTERVAL: int(value),
+                            CONF_ENABLE_CONTROLS: bool(enabled),
+                            CONF_CLIMATE_DURATION: int(duration),
+                        },
+                    )
+            else:
+                errors[CONF_POLL_INTERVAL] = "invalid_interval"
         return self.async_show_form(
             step_id="init",
             data_schema=p.Schema(
@@ -334,6 +362,26 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                         selector.NumberSelectorConfig(
                             min=MIN_POLL_INTERVAL,
                             max=MAX_POLL_INTERVAL,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                            unit_of_measurement="min",
+                        )
+                    ),
+                    p.Optional(
+                        CONF_ENABLE_CONTROLS,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_CONTROLS, False
+                        ),
+                    ): selector.BooleanSelector(),
+                    p.Optional(
+                        CONF_CLIMATE_DURATION,
+                        default=self.config_entry.options.get(
+                            CONF_CLIMATE_DURATION, DEFAULT_CLIMATE_DURATION
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=60,
                             step=1,
                             mode=selector.NumberSelectorMode.BOX,
                             unit_of_measurement="min",

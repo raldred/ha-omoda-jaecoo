@@ -2,9 +2,9 @@
 
 An **unofficial, early-stage** project exploring Home Assistant support for Omoda and Jaecoo vehicles using the European **OMODA JAECOO** app.
 
-**Current state: a native Home Assistant custom integration with read-only sensors and a standalone diagnostic script.** Tested offline against HA **2026.7.1 and 2026.9.4**. Account-password login and the battery/range/odometer field mappings were also verified with the standalone probe on one user's vehicle; the async HA implementation still needs live validation. This is not an official HA core integration or a guarantee of compatibility with every model.
+**Current state: a native Home Assistant custom integration with passive telemetry, experimental opt-in lock/climate controls, and a read-only diagnostic script.** Tested offline against HA **2026.7.1 and 2026.9.4**. Account-password login and native battery/range/odometer sensors have been validated on one user's vehicle. **Physical commands have not yet been tested on that vehicle.** This is not an official HA core integration or a guarantee of compatibility with every model.
 
-It supports accounts on the EU OMODA JAECOO backend, not CarLinko or automatic regional routing. Lock/unlock and climate control remain planned and **are not enabled in this release**.
+It supports accounts on the EU OMODA JAECOO backend, not CarLinko or automatic regional routing. Controls are **disabled by default**. The local integration icon uses the manufacturer-owned Android app artwork; see the licensing note below.
 
 ## Home Assistant installation and setup
 
@@ -18,7 +18,7 @@ Requires **Home Assistant 2026.7.1 or newer** for the current native config-flow
 4. Go to **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
 5. Enter your account email, **account password**, and country dialling code.
 6. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
-7. Optionally enter the **separate vehicle control PIN**, or leave it blank. The form explains that it is **stored only, not verified or used** in this read-only release. No PIN request is sent to the vehicle API.
+7. Optionally enter the **separate vehicle control PIN**, or leave it blank. The PIN is **not verified during setup**. It is used only for explicit commands after you enable controls. No PIN request or physical command is sent simply by setting up or enabling the integration.
 
 HACS metadata is included for future distribution, but this repo is currently private; do not assume ordinary public HACS installation will work. Manual installation is the documented path. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
 
@@ -31,6 +31,7 @@ Each selected vehicle gets a device with:
 | Battery | `dumpEnergy`, percent, normalized to one decimal place | %, one decimal |
 | Electric range | `dynamicPureElectricRange` (fallback `electricRange`/`pureElectricRange`), km | Miles |
 | Odometer | `odometer`, km | Miles |
+| Cabin temperature | `inCarTemperature` | HA temperature unit preference |
 | Vehicle report time | Explicit-zone/epoch source timestamp, if understood | Timestamp or unknown |
 | Cloud last checked | Time HA fetched the cloud snapshot | Timestamp |
 | Telemetry freshness | Source timestamp age / snapshot status | Current, stale, unknown, no snapshot or unreliable |
@@ -43,10 +44,35 @@ Cloud reads default to **every 5 minutes**, configurable from 5–60 minutes und
 
 A report time without a timezone is **not guessed**. Unrecognized/missing source timestamps produce **Observation time unknown**. Source timestamps older than 15 minutes are labelled stale. This label is based on the timestamp returned by the service, not independent verification of individual sensors. **Cloud last checked is never presented as the vehicle's observation time.**
 
+### Door/climate state and automation triggers
+
+Read-only binary sensors expose the reported lock state, climate running state, each of the four doors and the boot. They use ordinary HA state triggers in automations; no custom event or helper is needed. For the lock-status binary sensor, **on means unlocked**, following HA's LOCK device class. Missing/invalid fields remain unknown rather than off/closed. A cached cloud state is not proof of the car's current physical state.
+
+### Experimental remote controls (explicit opt-in)
+
+1. Save the **correct control PIN for this account** using Reconfigure if not already present.
+2. Open the integration's options and enable **Experimental remote controls**. This adds a native `lock` entity, and a native `climate` entity only when temperature limits, step and allowed durations are known.
+3. Choose the climate run duration in options (default 15 minutes). It must be one of the durations returned by your vehicle. Unknown capabilities or permissions fail closed.
+4. Perform the first tests while safely parked and physically able to verify the result. On hybrid models, preconditioning may run the engine: use a safe, ventilated location. **Do not build automatic unlocking rules before those supervised tests.**
+
+Native actions:
+
+- `lock.lock` / `lock.unlock` request locking/unlocking.
+- `climate.turn_on` / `climate.turn_off`, or OFF / HEAT_COOL mode, request cabin conditioning. HEAT_COOL is HA's model for the car choosing heating/cooling to achieve the target—not a separate vendor heat/cool command.
+- Changing temperature while off or unknown only remembers a local preference; explicitly turn on to operate the car. If telemetry reports climate on, changing temperature submits one command. Combined `hvac_mode` + temperature requests are rejected; use separate mode and temperature actions. The selected/requested temperature is separate from any last-reported cloud setpoint.
+
+Controls check the discovered vehicle and reported account permissions, select it, verify the PIN once, and submit one signed request. No wake/locate fallback, MQTT certificate, background command or automatic write retry is used. The explicit lock/climate command may itself wake/operate the vehicle.
+
+**Accepted is not completed.** The new Command status sensor and control attributes distinguish submitting, accepted-but-unconfirmed, rejected, unknown outcome, and PIN safety blocking. Native lock/HVAC state comes from cloud telemetry and is **never switched optimistically**. This REST-only implementation does not receive terminal MQTT acknowledgements; even a later matching state is not a sequence-correlated command confirmation. Do not treat an accepted service request as proof that the car locked, unlocked or started climate.
+
+Only one command can run per account, with at least 30 seconds between attempts. A timeout/ambiguous response is **not automatically retried** because the car may already have acted. Check it before trying again. Failed or inconclusive PIN verification (including cancellation mid-check) persistently pauses controls until you verify and explicitly re-enter the PIN in Reconfigure. Never try candidate PINs. A failed preparation/cancelled preparation sends no physical command.
+
+A dedicated delegated account may reduce conflicts with the official app, but its permissions and simultaneous-session behaviour must be validated. Our discovery supports authorized vehicles; the controls require explicit server-reported authority. To switch accounts currently, remove the old integration entry and add the delegated one; duplicate VINs across account entries are intentionally blocked.
+
 ### Credentials and maintenance
 
 - The account password is used once in the flow and **never saved** in the config entry. Access/refresh tokens are saved for automatic refresh, including rotated tokens. If the session is revoked, HA offers native reauthentication for the same account.
-- The control PIN is optional. Use **Reconfigure** to replace it or remove it; blank means keep the existing value. It is never checked against the cloud in this release.
+- The control PIN is optional for telemetry. Use **Reconfigure** to replace/remove it; blank keeps the existing value and any safety block. Explicitly entering a PIN clears the local safety block, so check it in the app before doing so. Verification happens only on a user-requested command, never startup or polling.
 - HA config-entry storage/backups are **not automatically encrypted**. Protect saved tokens, optional PIN, account email and vehicle identifiers. Diagnostics expose only an allowlisted structural summary, not these values or raw telemetry/GPS.
 - Logging into the official app can invalidate the HA session and vice versa. The integration never saves your password for repeated automatic login attempts.
 - The private API uses a refresh-token query parameter (matching the upstream working protocol) over verified HTTPS. Integration exceptions do not expose URLs, and redirects are disabled. Treat HTTP debug/proxy traces as sensitive; do not publish them.
@@ -148,11 +174,11 @@ Tests use synthetic credentials and fake responses; real sockets are blocked. No
 
 The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, native sensors and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography dependencies. The standalone probe remains separate to avoid a dependency on HA.
 
-Before adding controls: validate model capabilities, PIN/authorization, asynchronous command results, timeout/lockout handling, credential distribution and TLS requirements. Never turn a passive sensor refresh into an implicit climate/wake command.
+Before treating controls as production-ready, perform supervised model-specific PIN/permission, lock/unlock, climate and session tests. Terminal command acknowledgement remains unimplemented without the vendor MQTT channel. Never turn passive sensor refresh into an implicit climate/wake command.
 
 ## Repository boundaries
 
-App archives, decompiled sources, binary dumps, analysis, local investigation notes, captures and credentials are gitignored and **not distributed**. There are no bundled client certificates/private keys. Wire-protocol constants in `probe.py` are app-level constants from the public reference implementation, not personal account credentials.
+App archives, decompiled sources, binary dumps, analysis, local investigation notes, captures and credentials are gitignored and **not distributed**. The only explicitly requested app-artwork exception is the pair of local HA brand icons: vendor-owned imagery, **not MIT-licensed**. The source icon is 192px, upscaled to HA's 256/512px sizes. Keep the repository private pending permission review for public redistribution; this does not imply manufacturer affiliation. There are no bundled client certificates/private keys. Wire-protocol constants are app-level constants from the public reference implementation, not personal account credentials.
 
 Protocol work is based on [chery-connect-ha/omoda9-ha](https://github.com/chery-connect-ha/omoda9-ha), inspected at commit `7d80cd6a7215168f58d147cbd475c82e52cd3944`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and upstream MIT terms.
 

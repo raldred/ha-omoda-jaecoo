@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Connect your Omoda / Jaecoo account",
-        "description": "For the European OMODA JAECOO app only (not CarLinko). Use your account password, not the vehicle control PIN. Signing in may disconnect the official app. Your password is used once and is not saved; session tokens are stored locally. This release only reads cloud data and never wakes or controls the vehicle.",
+        "description": "For the European OMODA JAECOO app only (not CarLinko). Use your account password, not the vehicle control PIN. Signing in may disconnect the official app. Your password is used once and is not saved; session tokens are stored locally. Setup and polling only read cloud data. Remote commands are disabled by default and require separate opt-in after setup.",
         "data": {"email": "Account email", "password": "Account password", "country_code": "Account country dialling code"},
         "data_description": {"country_code": "Digits only, without +. For example, 44 for the UK. This does not change the EU backend."}
       },
@@ -15,7 +15,7 @@
       },
       "pin": {
         "title": "Vehicle control PIN (optional)",
-        "description": "You can save your separate vehicle control PIN for a future controls release, or leave this blank. It is NOT your account password. This release does not verify or use the PIN and cannot lock, unlock or start climate. If entered, the PIN is stored in Home Assistant's configuration and backups, which are not automatically encrypted. You can change or remove it later using Reconfigure.",
+        "description": "Save your separate vehicle control PIN to enable optional lock/climate commands later, or leave this blank for read-only use. It is NOT your account password. The PIN is not verified during setup; it is only submitted for an explicit command after you enable controls. It is stored in HA configuration/backups, which are not automatically encrypted. Change or remove it later using Reconfigure.",
         "data": {"control_pin": "Vehicle control PIN"},
         "data_description": {"control_pin": "4–8 digits, including leading zeros. Leave blank to avoid storing a PIN."}
       },
@@ -26,7 +26,7 @@
       },
       "reconfigure": {
         "title": "Change or remove the control PIN",
-        "description": "PIN verification and vehicle commands are not enabled in this release. Leave the new PIN blank to keep the current value, or select Remove saved PIN. Stored PINs are included in your HA configuration/backups. No request will be sent to verify it.",
+        "description": "Leave the new PIN blank to keep it, or select Remove saved PIN. No verification request is sent here. Entering a PIN explicitly clears the local safety block from a previous failed/inconclusive check: confirm the correct PIN in the app before retrying. Stored PINs are included in your HA configuration/backups.",
         "data": {"control_pin": "New vehicle control PIN", "clear_pin": "Remove saved PIN"}
       }
     },
@@ -55,24 +55,45 @@
   "options": {
     "step": {
       "init": {
-        "title": "Cloud polling",
-        "description": "How often to read existing cloud snapshots. Polling never wakes the vehicle. Parked-car data can remain stale even when requests succeed. Range and odometer default to miles; change their units in each entity's settings.",
-        "data": {"poll_interval": "Polling interval"}
+        "title": "Polling and optional remote controls",
+        "description": "Polling only reads cloud snapshots and never wakes the car. Enabling remote controls adds native Lock and Climate entities; using their actions or automations can physically unlock or operate the vehicle. Commands are experimental, require the correct PIN and permissions, and have NOT been validated on your car. API acceptance does not prove completion: check the Command status sensor and the vehicle. No MQTT acknowledgement or automatic wake is used. Start with a supervised test while safely parked. Climate duration must match a duration reported by your vehicle.",
+        "data": {"poll_interval": "Polling interval", "enable_controls": "Enable experimental remote controls", "climate_duration": "Climate run duration"}
       }
     },
-    "error": {"invalid_interval": "Choose a whole number from 5 to 60 minutes."}
+    "error": {
+      "invalid_interval": "Choose a whole number from 5 to 60 minutes.",
+      "invalid_duration": "Choose a whole number from 1 to 60 minutes. The vehicle must also report this duration as supported.",
+      "pin_required": "Save the vehicle control PIN using Reconfigure before enabling controls.",
+      "pin_blocked": "Controls are paused after an unsuccessful/inconclusive PIN check. Verify the correct PIN in the app, then re-enter it using Reconfigure."
+    }
   },
   "entity": {
     "sensor": {
       "battery": {"name": "Battery"},
       "electric_range": {"name": "Electric range"},
       "odometer": {"name": "Odometer"},
+      "cabin_temperature": {"name": "Cabin temperature"},
+      "command_status": {
+        "name": "Command status",
+        "state": {"not_requested": "No command requested", "submitting": "Submitting request", "accepted_unconfirmed": "Accepted — completion unconfirmed", "rejected": "Not sent or rejected", "unknown_outcome": "Outcome unknown — check vehicle", "pin_blocked": "Controls paused — check PIN", "not_sent": "Cancelled before submission"}
+      },
       "observed_at": {"name": "Vehicle report time"},
       "fetched_at": {"name": "Cloud last checked"},
       "freshness": {
         "name": "Telemetry freshness",
         "state": {"current": "Reported within 15 minutes", "stale": "Older than 15 minutes", "unknown": "Observation time unknown", "no_data": "No snapshot returned", "unreliable": "Unreliable vehicle snapshot"}
       }
-    }
+    },
+    "binary_sensor": {
+      "door_lock": {"name": "Door lock status"},
+      "climate_running": {"name": "Climate running"},
+      "door_front_left": {"name": "Front left door"},
+      "door_front_right": {"name": "Front right door"},
+      "door_rear_left": {"name": "Rear left door"},
+      "door_rear_right": {"name": "Rear right door"},
+      "boot": {"name": "Boot"}
+    },
+    "lock": {"lock": {"name": "Doors"}},
+    "climate": {"climate": {"name": "Climate"}}
   }
 }

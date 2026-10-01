@@ -9,7 +9,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfLength
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfLength,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -46,6 +51,29 @@ DESCRIPTIONS = (
         suggested_display_precision=0,
     ),
     SensorEntityDescription(
+        key="cabin_temperature",
+        translation_key="cabin_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    SensorEntityDescription(
+        key="command_status",
+        translation_key="command_status",
+        device_class=SensorDeviceClass.ENUM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        options=[
+            "not_requested",
+            "submitting",
+            "accepted_unconfirmed",
+            "rejected",
+            "unknown_outcome",
+            "pin_blocked",
+            "not_sent",
+        ],
+    ),
+    SensorEntityDescription(
         key="observed_at",
         translation_key="observed_at",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -75,6 +103,7 @@ async def async_setup_entry(
         OmodaJaecooSensor(coordinator, vin, description)
         for vin in coordinator.selected_vins
         for description in DESCRIPTIONS
+        if description.key != "command_status" or coordinator.controls_enabled
     )
 
 
@@ -102,7 +131,15 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
         )
 
     @property
+    def available(self) -> bool:
+        if self.entity_description.key == "command_status":
+            return True
+        return super().available
+
+    @property
     def native_value(self):
+        if self.entity_description.key == "command_status":
+            return self.coordinator.last_command_status.get(self._vin, "not_requested")
         snapshot = (self.coordinator.data or {}).get(self._vin)
         if snapshot is None:
             return None
