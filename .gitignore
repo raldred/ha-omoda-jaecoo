@@ -1,0 +1,28 @@
+# Local app archives and reverse-engineering material: NEVER publish.
+JaecooApps/
+analysis/
+research-*.md
+INVESTIGATION.md
+
+# Credentials and captured vehicle/account data
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+token*.json
+captures/
+probe-output/
+
+# Python / local tools
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+.DS_Store
