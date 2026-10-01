@@ -31,3 +31,18 @@ jobs:
           python-version: "3.14"
       - run: uv sync --locked
       - run: uv run pytest -q
+
+  home-assistant-compatibility:
+    runs-on: ubuntu-latest
+    env:
+      HA_TEST_VERSION: "2026.7.1"
+      HA_TEST_PLUGIN_VERSION: "0.13.345"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+      - run: >-
+          uv run --no-project --python 3.14
+          --with pytest-homeassistant-custom-component==0.13.345
+          pytest -c tests/ha/pyproject.toml -q tests/ha

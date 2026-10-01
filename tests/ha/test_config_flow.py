@@ -2,8 +2,8 @@
 
 from unittest.mock import patch
 
-import probatio as p
 import pytest
+import voluptuous as p
 from conftest import DOMAIN, EMAIL, PASSWORD, PIN, VIN, VIN_2
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType, InvalidData

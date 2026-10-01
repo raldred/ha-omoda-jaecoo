@@ -1,6 +1,7 @@
 """Real HA entity/coordinator lifecycle with wholly mocked vehicle transport."""
 
 import json
+import os
 from importlib import import_module
 from unittest.mock import patch
 
@@ -18,8 +19,10 @@ async def test_harness_uses_pinned_real_ha_and_blocks_tcp(hass):
 
     import pytest_socket
 
-    assert version("homeassistant") == "2026.9.4"
-    assert version("pytest-homeassistant-custom-component") == "0.13.367"
+    assert version("homeassistant") == os.environ.get("HA_TEST_VERSION", "2026.9.4")
+    assert version("pytest-homeassistant-custom-component") == os.environ.get(
+        "HA_TEST_PLUGIN_VERSION", "0.13.367"
+    )
     # Inspect the replacement rather than attempting a socket: HA's plugin
     # considers even deliberately caught blocked-socket attempts a test failure.
     assert socket.socket is not pytest_socket._true_socket

@@ -2,13 +2,13 @@
 
 An **unofficial, early-stage** project exploring Home Assistant support for Omoda and Jaecoo vehicles using the European **OMODA JAECOO** app.
 
-**Current state: a native Home Assistant custom integration with read-only sensors and a standalone diagnostic script.** Tested offline against HA **2026.9.4**. Account-password login and the battery/range/odometer field mappings were also verified with the standalone probe on one user's vehicle; the async HA implementation still needs live validation. This is not an official HA core integration or a guarantee of compatibility with every model.
+**Current state: a native Home Assistant custom integration with read-only sensors and a standalone diagnostic script.** Tested offline against HA **2026.7.1 and 2026.9.4**. Account-password login and the battery/range/odometer field mappings were also verified with the standalone probe on one user's vehicle; the async HA implementation still needs live validation. This is not an official HA core integration or a guarantee of compatibility with every model.
 
 It supports accounts on the EU OMODA JAECOO backend, not CarLinko or automatic regional routing. Lock/unlock and climate control remain planned and **are not enabled in this release**.
 
 ## Home Assistant installation and setup
 
-Requires **Home Assistant 2026.9.4 or newer** for the current native config-flow implementation. No vehicle commands are issued during setup, startup, polling or reauthentication.
+Requires **Home Assistant 2026.7.1 or newer** for the current native config-flow implementation. No vehicle commands are issued during setup, startup, polling or reauthentication.
 
 ### Install manually (private repository)
 
@@ -132,6 +132,16 @@ To run the native Home Assistant flow/entity tests (separate Python 3.14 environ
 cd tests/ha
 uv sync --locked
 uv run pytest -q
+```
+
+The compatibility suite also runs against HA 2026.7.1 (the reference installation):
+
+```sh
+# From repository root
+HA_TEST_VERSION=2026.7.1 HA_TEST_PLUGIN_VERSION=0.13.345 \
+  uv run --no-project --python 3.14 \
+  --with pytest-homeassistant-custom-component==0.13.345 \
+  pytest -c tests/ha/pyproject.toml -q tests/ha
 ```
 
 Tests use synthetic credentials and fake responses; real sockets are blocked. No live credentials belong in CI. HTTPS certificate/hostname verification remains enabled and redirects are disabled. Environment proxies and `.netrc` are deliberately ignored for this probe; no TLS-bypass switch is provided.

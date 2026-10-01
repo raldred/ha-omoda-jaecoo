@@ -6,7 +6,7 @@ import hashlib
 import re
 from typing import Any
 
-import probatio as p
+import voluptuous as p
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD
