@@ -25,7 +25,7 @@ DESCRIPTIONS = (
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        suggested_display_precision=0,
+        suggested_display_precision=1,
     ),
     SensorEntityDescription(
         key="electric_range",

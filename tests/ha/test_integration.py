@@ -65,6 +65,18 @@ async def test_setup_selected_vehicle_and_unload(hass, entry, mock_api):
     assert not coordinator._listeners
 
 
+async def test_battery_state_and_default_display_use_one_decimal(hass, entry, mock_api):
+    mock_api.async_realtime.return_value = {"dumpEnergy": "50.12345678901234567890"}
+    await setup(hass, entry)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"eu_{VIN}_battery"
+    )
+    assert hass.states.get(entity_id).state == "50.1"
+    sensor_module = import_module(f"custom_components.{DOMAIN}.sensor")
+    description = next(d for d in sensor_module.DESCRIPTIONS if d.key == "battery")
+    assert description.suggested_display_precision == 1
+
+
 async def test_distance_defaults_to_miles_and_accepts_ha_override(
     hass, entry, mock_api
 ):

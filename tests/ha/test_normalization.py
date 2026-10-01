@@ -40,6 +40,39 @@ def test_battery_limit_and_kilometres_ignore_display_flag():
     assert result.odometer == 100
 
 
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("50.12345678901234567890", 50.1),
+        (50.1687654321, 50.2),
+        ("0", 0.0),
+        ("100", 100.0),
+        ("99.99", 100.0),
+        ("100.01", None),
+        (None, None),
+        ("nan", None),
+    ],
+)
+def test_battery_is_normalized_before_storage(value, expected):
+    snapshot = normalize_snapshot({"dumpEnergy": value}, NOW)
+    assert snapshot.battery == expected
+    assert normalize_snapshot({}, NOW, snapshot).battery == expected
+
+
+def test_battery_rounding_does_not_create_a_false_degraded_frame():
+    snapshot = normalize_snapshot(
+        {
+            "dumpEnergy": "0.04",
+            "dynamicPureElectricRange": "1",
+            "totalVoltage": "0",
+            "totalCurrent": "-1000",
+        },
+        NOW,
+    )
+    assert snapshot.battery == 0.0
+    assert not snapshot.degraded
+
+
 def test_zero_range_is_not_overwritten_by_fallback():
     result = normalize_snapshot(
         {"dynamicPureElectricRange": "0", "electricRange": "50"}, NOW

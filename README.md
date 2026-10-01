@@ -28,7 +28,7 @@ Each selected vehicle gets a device with:
 
 | Sensor | Native data | Default display |
 |---|---|---|
-| Battery | `dumpEnergy`, percent | % |
+| Battery | `dumpEnergy`, percent, normalized to one decimal place | %, one decimal |
 | Electric range | `dynamicPureElectricRange` (fallback `electricRange`/`pureElectricRange`), km | Miles |
 | Odometer | `odometer`, km | Miles |
 | Vehicle report time | Explicit-zone/epoch source timestamp, if understood | Timestamp or unknown |

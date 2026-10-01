@@ -148,7 +148,7 @@ def normalize_snapshot(
             degraded=True,
         )
     return VehicleSnapshot(
-        battery=battery,
+        battery=round(battery, 1) if battery is not None else None,
         electric_range=range_value,
         odometer=finite_number(data.get("odometer")),
         observed_at=observation_time(data, now),
