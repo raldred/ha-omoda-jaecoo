@@ -18,6 +18,8 @@ _COMMAND_STATUSES = frozenset(
         "rejected",
         "unknown_outcome",
         "pin_blocked",
+        "state_observed",
+        "confirmation_timeout",
     }
 )
 

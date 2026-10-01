@@ -71,6 +71,8 @@ DESCRIPTIONS = (
             "unknown_outcome",
             "pin_blocked",
             "not_sent",
+            "state_observed",
+            "confirmation_timeout",
         ],
     ),
     SensorEntityDescription(

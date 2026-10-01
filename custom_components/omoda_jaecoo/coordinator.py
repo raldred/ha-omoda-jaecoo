@@ -45,6 +45,23 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Extra passive reads after a lock request, not command retries. Each delay follows
+# the previous read; the overall deadline also bounds slow network responses.
+LOCK_STATUS_DELAYS = (1, 4, 5, 10, 15)
+LOCK_STATUS_TIMEOUT = 60
+
+
+@dataclass
+class LockRequest:
+    target: bool
+    prior_locked: bool | None
+    started_at: datetime
+    accepted: bool = False
+    waiting: bool = True
+    state_observed: bool = False
+    report_known: bool = False
+    outcome_unknown: bool = False
+
 
 @dataclass(frozen=True)
 class VehicleSnapshot:
@@ -226,6 +243,10 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
         self._command_lock = asyncio.Lock()
         self._last_command_at: float | None = None
         self.last_command_status: dict[str, str] = {}
+        self._last_command_kind: dict[str, str] = {}
+        self._lock_requests: dict[str, LockRequest] = {}
+        self._lock_followup_tasks: dict[str, asyncio.Task] = {}
+        self._climate_followup_tasks: dict[str, asyncio.Task] = {}
         self.options = dict(entry.options)
         self.selected_vins = list(entry.data[CONF_SELECTED_VINS])
         self.vehicles: dict[str, Vehicle] = {}
@@ -281,7 +302,144 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 "Unable to read vehicle telemetry from the cloud."
             ) from err
         self.update_interval = self.poll_interval
+        self._reconcile_lock_reports(result)
         return result
+
+    def pending_lock_target(self, vin: str) -> bool | None:
+        request = self._lock_requests.get(vin)
+        return request.target if request is not None and request.waiting else None
+
+    def lock_state_uncertain(self, vin: str) -> bool:
+        request = self._lock_requests.get(vin)
+        return bool(
+            request
+            and (request.accepted or request.outcome_unknown)
+            and not request.report_known
+        )
+
+    def _reconcile_lock_reports(self, snapshots: dict[str, VehicleSnapshot]) -> None:
+        for vin, request in self._lock_requests.items():
+            snapshot = snapshots.get(vin)
+            if not (request.accepted or request.outcome_unknown):
+                continue
+            if (
+                snapshot is None
+                or not snapshot.has_payload
+                or snapshot.degraded
+                or snapshot.door_locked is None
+            ):
+                if not request.state_observed:
+                    request.report_known = False
+                continue
+            if snapshot.observed_at is not None:
+                credible = (
+                    request.started_at <= snapshot.observed_at <= snapshot.fetched_at
+                )
+            else:
+                # Without a usable source time, a changed known state is evidence of
+                # a new report; an unchanged cached target or prior unknown isn't.
+                credible = (
+                    request.prior_locked is not None
+                    and snapshot.door_locked is not request.prior_locked
+                )
+            if not credible:
+                if not request.state_observed:
+                    request.report_known = False
+                continue
+            request.report_known = True
+            if snapshot.door_locked is request.target:
+                request.state_observed = True
+                request.waiting = False
+                if self._last_command_kind.get(vin) == "lock":
+                    self.last_command_status[vin] = "state_observed"
+
+    def _start_lock_followup(self, vin: str, request: LockRequest) -> None:
+        # HA owns/cancels this task on entry unload. Superseded tasks notice their
+        # request identity changed and exit without clobbering the new operation.
+        task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_follow_lock(vin, request),
+            "Omoda / Jaecoo lock status checks",
+            eager_start=False,
+        )
+        self._lock_followup_tasks[vin] = task
+        # A task cancelled before its first execution never reaches its finally block.
+        task.add_done_callback(
+            lambda done: self._finish_lock_followup(vin, request, done)
+        )
+
+    def _finish_lock_followup(
+        self, vin: str, request: LockRequest, task: asyncio.Task | None
+    ) -> None:
+        if self._lock_followup_tasks.get(vin) is task:
+            self._lock_followup_tasks.pop(vin, None)
+        if self._lock_requests.get(vin) is not request:
+            return
+        changed = request.waiting
+        request.waiting = False
+        if not request.state_observed and self._last_command_kind.get(vin) == "lock":
+            changed |= self.last_command_status.get(vin) != "confirmation_timeout"
+            self.last_command_status[vin] = "confirmation_timeout"
+        if changed:
+            self.async_update_listeners()
+
+    async def _async_follow_lock(self, vin: str, request: LockRequest) -> None:
+        try:
+            async with asyncio.timeout(LOCK_STATUS_TIMEOUT):
+                for delay in LOCK_STATUS_DELAYS:
+                    await asyncio.sleep(delay)
+                    if (
+                        self._lock_requests.get(vin) is not request
+                        or request.state_observed
+                    ):
+                        return
+                    # Public coordinator refresh serializes with normal polling and
+                    # handles auth failures/backoff. It reads selected cars only.
+                    await self.async_refresh()
+                    if (
+                        self._lock_requests.get(vin) is not request
+                        or request.state_observed
+                        or not self.last_update_success
+                    ):
+                        return
+        except TimeoutError:
+            pass
+        finally:
+            self._finish_lock_followup(vin, request, asyncio.current_task())
+
+    def _start_climate_followup(self, vin: str) -> None:
+        # Climate has no native pending mode: just refresh reported values promptly.
+        # It keeps accepted_unconfirmed because we cannot correlate a terminal ACK.
+        task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_follow_climate(vin),
+            "Omoda / Jaecoo climate status checks",
+            eager_start=False,
+        )
+        self._climate_followup_tasks[vin] = task
+        task.add_done_callback(lambda done: self._finish_climate_followup(vin, done))
+
+    def _finish_climate_followup(self, vin: str, task: asyncio.Task | None) -> None:
+        if self._climate_followup_tasks.get(vin) is task:
+            self._climate_followup_tasks.pop(vin, None)
+
+    async def _async_follow_climate(self, vin: str) -> None:
+        try:
+            async with asyncio.timeout(LOCK_STATUS_TIMEOUT):
+                for delay in LOCK_STATUS_DELAYS:
+                    await asyncio.sleep(delay)
+                    if (
+                        self._climate_followup_tasks.get(vin)
+                        is not asyncio.current_task()
+                    ):
+                        return
+                    await self.async_refresh()
+                    if not self.last_update_success:
+                        return
+        except TimeoutError:
+            pass
+        finally:
+            self._finish_climate_followup(vin, asyncio.current_task())
 
     @property
     def controls_enabled(self) -> bool:
@@ -346,6 +504,19 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
             )
         async with self._command_lock:
             self._last_command_at = time.monotonic()
+            self._last_command_kind[vin] = "lock" if locked is not None else "climate"
+            # Supersede older climate checks without cancelling an in-flight shared
+            # coordinator read (which could spuriously mark all entities unavailable).
+            self._climate_followup_tasks.pop(vin, None)
+            lock_request = None
+            if locked is not None:
+                snapshot = (self.data or {}).get(vin)
+                lock_request = LockRequest(
+                    target=locked,
+                    prior_locked=snapshot.door_locked if snapshot else None,
+                    started_at=dt_util.utcnow(),
+                )
+                self._lock_requests[vin] = lock_request
             self.last_command_status[vin] = "submitting"
             self.async_update_listeners()
             try:
@@ -367,6 +538,9 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 raise
             except CommandCancelled:
                 self.last_command_status[vin] = "unknown_outcome"
+                if lock_request is not None:
+                    lock_request.outcome_unknown = True
+                    lock_request.waiting = False
                 raise
             except PinVerificationError as err:
                 self._block_pin()
@@ -376,6 +550,9 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 ) from err
             except CommandOutcomeUnknown as err:
                 self.last_command_status[vin] = "unknown_outcome"
+                if lock_request is not None:
+                    lock_request.outcome_unknown = True
+                    lock_request.waiting = False
                 raise HomeAssistantError(
                     "The command outcome is unknown; the car may have acted. Check the vehicle before retrying."
                 ) from err
@@ -389,14 +566,28 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 # Unexpected client failures must not leave a permanent submitting state
                 # or expose request details. Never assume the vehicle did not act.
                 self.last_command_status[vin] = "unknown_outcome"
+                if lock_request is not None:
+                    lock_request.outcome_unknown = True
+                    lock_request.waiting = False
                 raise HomeAssistantError(
                     "An unexpected command error occurred; outcome is unknown. Check the vehicle before retrying."
                 ) from None
             else:
                 self.last_command_status[vin] = "accepted_unconfirmed"
+                if lock_request is not None:
+                    lock_request.accepted = True
+                    self._start_lock_followup(vin, lock_request)
+                else:
+                    self._start_climate_followup(vin)
             finally:
                 self._last_command_at = time.monotonic()
+                if (
+                    lock_request is not None
+                    and not lock_request.accepted
+                    and not lock_request.outcome_unknown
+                    and self._lock_requests.get(vin) is lock_request
+                ):
+                    self._lock_requests.pop(vin, None)
                 self.async_update_listeners()
-        # One passive refresh only. It cannot establish seq-correlated completion.
-        # Never set a lock/HVAC state optimistically or retry the physical action.
-        await self.async_request_refresh()
+        # Feedback continues in bounded background reads, allowing the service to
+        # return promptly after acceptance. Neither path retries the physical command.

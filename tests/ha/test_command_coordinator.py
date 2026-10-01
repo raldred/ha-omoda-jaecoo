@@ -57,7 +57,9 @@ async def test_accepted_request_is_not_confirmed_state(hass, entry, mock_api):
     client.async_lock.assert_awaited_once_with(VIN, PIN, True)
     assert coord.last_command_status[VIN] == "accepted_unconfirmed"
     assert coord.data[VIN].door_locked is False
-    coord.async_request_refresh.assert_awaited_once()
+    # Lock confirmation is entry-owned background work, not an awaited debounce.
+    coord.async_request_refresh.assert_not_awaited()
+    assert coord.pending_lock_target(VIN) is True
     with pytest.raises(HomeAssistantError, match="30 seconds"):
         await coord.async_lock(VIN, False)
     assert client.async_lock.await_count == 1
@@ -74,7 +76,9 @@ async def test_climate_passes_configured_duration(hass, entry, mock_api):
             "options": {"enable_controls": True, "climate_duration": 10},
         },
     )()
-    await coord.async_climate(VIN, True, 21.5)
+    with patch.object(coord, "_start_climate_followup") as followup:
+        await coord.async_climate(VIN, True, 21.5)
+        followup.assert_called_once_with(VIN)
     client.async_climate.assert_awaited_once_with(VIN, PIN, True, 21.5, 10)
     assert coord.last_command_status[VIN] == "accepted_unconfirmed"
 

@@ -31,7 +31,17 @@ class OmodaJaecooLock(OmodaJaecooControlEntity, LockEntity):
         super().__init__(coordinator, vin, "lock")
 
     @property
+    def is_locking(self) -> bool:
+        return self.coordinator.pending_lock_target(self._vin) is True
+
+    @property
+    def is_unlocking(self) -> bool:
+        return self.coordinator.pending_lock_target(self._vin) is False
+
+    @property
     def is_locked(self) -> bool | None:
+        if self.coordinator.lock_state_uncertain(self._vin):
+            return None
         return self.snapshot.door_locked if self.snapshot else None
 
     async def async_lock(self, **kwargs: Any) -> None:

@@ -71,6 +71,12 @@ class FakeCoordinator(DataUpdateCoordinator):
         self.async_lock = AsyncMock(side_effect=self._accepted)
         self.async_climate = AsyncMock(side_effect=self._accepted)
 
+    def pending_lock_target(self, vin):
+        return None
+
+    def lock_state_uncertain(self, vin):
+        return False
+
     async def _accepted(self, vin, *args):
         self.last_command_status[vin] = "accepted_unconfirmed"
 

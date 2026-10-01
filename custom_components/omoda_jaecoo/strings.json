@@ -75,7 +75,7 @@
       "cabin_temperature": {"name": "Cabin temperature"},
       "command_status": {
         "name": "Command status",
-        "state": {"not_requested": "No command requested", "submitting": "Submitting request", "accepted_unconfirmed": "Accepted — completion unconfirmed", "rejected": "Not sent or rejected", "unknown_outcome": "Outcome unknown — check vehicle", "pin_blocked": "Controls paused — check PIN", "not_sent": "Cancelled before submission"}
+        "state": {"not_requested": "No command requested", "submitting": "Submitting request", "accepted_unconfirmed": "Accepted — completion unconfirmed", "rejected": "Not sent or rejected", "unknown_outcome": "Outcome unknown — check vehicle", "pin_blocked": "Controls paused — check PIN", "not_sent": "Cancelled before submission", "state_observed": "Requested lock state reported", "confirmation_timeout": "Lock state not confirmed — check vehicle"}
       },
       "observed_at": {"name": "Vehicle report time"},
       "fetched_at": {"name": "Cloud last checked"},
