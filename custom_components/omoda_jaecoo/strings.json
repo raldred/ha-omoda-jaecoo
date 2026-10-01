@@ -1,0 +1,78 @@
+{
+  "title": "Omoda / Jaecoo",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your Omoda / Jaecoo account",
+        "description": "For the European OMODA JAECOO app only (not CarLinko). Use your account password, not the vehicle control PIN. Signing in may disconnect the official app. Your password is used once and is not saved; session tokens are stored locally. This release only reads cloud data and never wakes or controls the vehicle.",
+        "data": {"email": "Account email", "password": "Account password", "country_code": "Account country dialling code"},
+        "data_description": {"country_code": "Digits only, without +. For example, 44 for the UK. This does not change the EU backend."}
+      },
+      "vehicles": {
+        "title": "Choose vehicles",
+        "description": "Select which authorized vehicles to add. Each vehicle gets its own device and sensors. Only existing cloud snapshots will be read.",
+        "data": {"selected_vins": "Vehicles"}
+      },
+      "pin": {
+        "title": "Vehicle control PIN (optional)",
+        "description": "You can save your separate vehicle control PIN for a future controls release, or leave this blank. It is NOT your account password. This release does not verify or use the PIN and cannot lock, unlock or start climate. If entered, the PIN is stored in Home Assistant's configuration and backups, which are not automatically encrypted. You can change or remove it later using Reconfigure.",
+        "data": {"control_pin": "Vehicle control PIN"},
+        "data_description": {"control_pin": "4–8 digits, including leading zeros. Leave blank to avoid storing a PIN."}
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The saved session for this account can no longer be used. Enter its account password again. This may disconnect the official app. Your selected vehicles and optional PIN are kept; the password is not saved.",
+        "data": {"password": "Account password"}
+      },
+      "reconfigure": {
+        "title": "Change or remove the control PIN",
+        "description": "PIN verification and vehicle commands are not enabled in this release. Leave the new PIN blank to keep the current value, or select Remove saved PIN. Stored PINs are included in your HA configuration/backups. No request will be sent to verify it.",
+        "data": {"control_pin": "New vehicle control PIN", "clear_pin": "Remove saved PIN"}
+      }
+    },
+    "error": {
+      "invalid_auth": "Sign-in was rejected or the session expired. Check your account password and that you use the EU OMODA JAECOO app. Do not repeatedly retry. Accounts requiring a verification challenge are not supported yet.",
+      "cannot_connect": "Unable to reach the cloud service. Check connectivity and try again later.",
+      "rate_limited": "The service is limiting requests. Wait before trying again.",
+      "api_error": "The service returned an unexpected response. No vehicle command was sent. Try again later or check compatibility with your app/region.",
+      "no_vehicles": "No authorized vehicles were found. Check vehicle binding and account permissions in the official app.",
+      "invalid_email": "Enter the email address used for your app account.",
+      "invalid_country": "Enter a country dialling code using 1–4 digits, without + or a leading zero.",
+      "invalid_selection": "Select at least one of the discovered vehicles.",
+      "invalid_pin": "Enter 4–8 digits, or leave the PIN blank. This is not your account password.",
+      "pin_conflict": "Enter a new PIN or select Remove saved PIN, not both."
+    },
+    "abort": {
+      "already_configured": "This EU account is already configured.",
+      "vehicle_already_configured": "A selected vehicle is already configured through another account. Keep only one integration entry per vehicle to avoid conflicting sessions and duplicate sensors.",
+      "setup_expired": "Setup expired. Start again to sign in.",
+      "reauth_successful": "Signed in again successfully.",
+      "reconfigure_successful": "PIN settings updated. No PIN verification or vehicle command was sent.",
+      "unique_id_mismatch": "Sign in with the same account used for this integration.",
+      "vehicle_access_changed": "The account no longer provides access to one or more selected vehicles. Check its permissions, or remove and set up the integration again. Existing settings were not replaced."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cloud polling",
+        "description": "How often to read existing cloud snapshots. Polling never wakes the vehicle. Parked-car data can remain stale even when requests succeed. Range and odometer default to miles; change their units in each entity's settings.",
+        "data": {"poll_interval": "Polling interval"}
+      }
+    },
+    "error": {"invalid_interval": "Choose a whole number from 5 to 60 minutes."}
+  },
+  "entity": {
+    "sensor": {
+      "battery": {"name": "Battery"},
+      "electric_range": {"name": "Electric range"},
+      "odometer": {"name": "Odometer"},
+      "observed_at": {"name": "Vehicle report time"},
+      "fetched_at": {"name": "Cloud last checked"},
+      "freshness": {
+        "name": "Telemetry freshness",
+        "state": {"current": "Reported within 15 minutes", "stale": "Older than 15 minutes", "unknown": "Observation time unknown", "no_data": "No snapshot returned", "unreliable": "Unreliable vehicle snapshot"}
+      }
+    }
+  }
+}

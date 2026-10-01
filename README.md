@@ -2,11 +2,62 @@
 
 An **unofficial, early-stage** project exploring Home Assistant support for Omoda and Jaecoo vehicles using the European **OMODA JAECOO** app.
 
-**Current state: a standalone, read-only diagnostic script. This is not yet an installable Home Assistant integration.** It has offline tests; compatibility with your account/model still needs live validation. It does not support CarLinko or automatically select other regional backends.
+**Current state: a native Home Assistant custom integration with read-only sensors and a standalone diagnostic script.** Tested offline against HA **2026.9.4**. Account-password login and the battery/range/odometer field mappings were also verified with the standalone probe on one user's vehicle; the async HA implementation still needs live validation. This is not an official HA core integration or a guarantee of compatibility with every model.
 
-Planned HA scope: EV battery percentage and range, door locks, and climate control. Those controls are **not implemented in this probe**.
+It supports accounts on the EU OMODA JAECOO backend, not CarLinko or automatic regional routing. Lock/unlock and climate control remain planned and **are not enabled in this release**.
 
-## What the probe does
+## Home Assistant installation and setup
+
+Requires **Home Assistant 2026.9.4 or newer** for the current native config-flow implementation. No vehicle commands are issued during setup, startup, polling or reauthentication.
+
+### Install manually (private repository)
+
+1. Clone/download this repository using your GitHub account with access.
+2. Copy **only** `custom_components/omoda_jaecoo/` into HA's configuration directory, resulting in `/config/custom_components/omoda_jaecoo/manifest.json`. Keep the folder name exactly `omoda_jaecoo`.
+3. Restart Home Assistant at a suitable time. Installation/restart is a deliberate user action, not something the probe performs.
+4. Go to **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
+5. Enter your account email, **account password**, and country dialling code.
+6. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
+7. Optionally enter the **separate vehicle control PIN**, or leave it blank. The form explains that it is **stored only, not verified or used** in this read-only release. No PIN request is sent to the vehicle API.
+
+HACS metadata is included for future distribution, but this repo is currently private; do not assume ordinary public HACS installation will work. Manual installation is the documented path. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
+
+### Native entities
+
+Each selected vehicle gets a device with:
+
+| Sensor | Native data | Default display |
+|---|---|---|
+| Battery | `dumpEnergy`, percent | % |
+| Electric range | `dynamicPureElectricRange` (fallback `electricRange`/`pureElectricRange`), km | Miles |
+| Odometer | `odometer`, km | Miles |
+| Vehicle report time | Explicit-zone/epoch source timestamp, if understood | Timestamp or unknown |
+| Cloud last checked | Time HA fetched the cloud snapshot | Timestamp |
+| Telemetry freshness | Source timestamp age / snapshot status | Current, stale, unknown, no snapshot or unreliable |
+
+**Miles are the initial default, even on a metric HA installation.** Choose kilometres in an entity's standard settings if preferred. HA handles conversion; the integration always stores distance measurements in kilometres and does not override your later preference.
+
+`rangeUnit` is not used to reinterpret the raw kilometre fields: the probe confirmed 262 km → 163 mi on the reference vehicle. Other models/field fallbacks need validation. Negative, nonfinite and out-of-range battery values become unknown, not zero. Genuine zero is retained unless accompanied by the known invalid HV-frame pattern (zero voltage and -1000 current with zero battery/range). Those degraded snapshots keep previous readings, if any, and are labelled unreliable. This first version does not yet identify every possible vendor sleep sentinel.
+
+Cloud reads default to **every 5 minutes**, configurable from 5–60 minutes under the integration's options. HTTP rate limiting backs polling off up to an hour. This is a conservative implementation choice, not a published vendor allowance. No wake/locate command, MQTT connection or automatic climate activation is involved. Empty/asleep replies retain previous measurements in memory but show **No snapshot returned**. Network failures make entities unavailable. A successful cloud read can still contain an old snapshot.
+
+A report time without a timezone is **not guessed**. Unrecognized/missing source timestamps produce **Observation time unknown**. Source timestamps older than 15 minutes are labelled stale. This label is based on the timestamp returned by the service, not independent verification of individual sensors. **Cloud last checked is never presented as the vehicle's observation time.**
+
+### Credentials and maintenance
+
+- The account password is used once in the flow and **never saved** in the config entry. Access/refresh tokens are saved for automatic refresh, including rotated tokens. If the session is revoked, HA offers native reauthentication for the same account.
+- The control PIN is optional. Use **Reconfigure** to replace it or remove it; blank means keep the existing value. It is never checked against the cloud in this release.
+- HA config-entry storage/backups are **not automatically encrypted**. Protect saved tokens, optional PIN, account email and vehicle identifiers. Diagnostics expose only an allowlisted structural summary, not these values or raw telemetry/GPS.
+- Logging into the official app can invalidate the HA session and vice versa. The integration never saves your password for repeated automatic login attempts.
+- The private API uses a refresh-token query parameter (matching the upstream working protocol) over verified HTTPS. Integration exceptions do not expose URLs, and redirects are disabled. Treat HTTP debug/proxy traces as sensitive; do not publish them.
+- Removal/unloading stops coordinator polling; it does not issue a cloud logout that could affect other clients.
+- No mobile-app binaries, vendor MQTT certificates or client private keys are distributed.
+
+## Standalone diagnostic probe
+
+The probe remains useful before installation or when investigating a response shape. It does not share saved credentials with HA.
+
+### What the probe does
 
 1. Prompts for account email and password (password entry is hidden).
 2. Signs in through the EU app gateway and lists vehicles authorized for that account.
@@ -75,9 +126,19 @@ uv sync --locked --group dev
 uv run pytest -q
 ```
 
+To run the native Home Assistant flow/entity tests (separate Python 3.14 environment):
+
+```sh
+cd tests/ha
+uv sync --locked
+uv run pytest -q
+```
+
 Tests use synthetic credentials and fake responses; real sockets are blocked. No live credentials belong in CI. HTTPS certificate/hostname verification remains enabled and redirects are disabled. Environment proxies and `.netrc` are deliberately ignored for this probe; no TLS-bypass switch is provided.
 
-The future HA integration would live under `custom_components/omoda_jaecoo/`. Before adding controls: validate model capabilities, PIN/authorization, asynchronous command results, timeout/lockout handling, credential distribution and TLS requirements. Never turn a passive sensor refresh into an implicit climate/wake command.
+The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, native sensors and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography dependencies. The standalone probe remains separate to avoid a dependency on HA.
+
+Before adding controls: validate model capabilities, PIN/authorization, asynchronous command results, timeout/lockout handling, credential distribution and TLS requirements. Never turn a passive sensor refresh into an implicit climate/wake command.
 
 ## Repository boundaries
 

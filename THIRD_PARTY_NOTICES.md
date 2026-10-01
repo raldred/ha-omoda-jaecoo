@@ -1,6 +1,6 @@
 # Third-party notices
 
-The EU password encoding, BFF header/signature format, TSP realtime request signature, and endpoint configuration in `probe.py` were implemented with reference to:
+The EU password encoding, BFF header/signature format, token-refresh grant, TSP realtime request signature, and endpoint configuration in `probe.py` and `custom_components/omoda_jaecoo/api.py` were implemented with reference to:
 
 - Project: chery-connect-ha/omoda9-ha (originally Caslinovich/omoda9-ha)
 - Source: https://github.com/chery-connect-ha/omoda9-ha

@@ -1,0 +1,15 @@
+"""Constants for the EU Omoda / Jaecoo integration."""
+
+DOMAIN = "omoda_jaecoo"
+CONF_EMAIL = "email"
+CONF_COUNTRY_CODE = "country_code"
+CONF_TOKENS = "tokens"
+CONF_VEHICLES = "vehicles"
+CONF_SELECTED_VINS = "selected_vins"
+CONF_CONTROL_PIN = "control_pin"
+CONF_CLEAR_PIN = "clear_pin"
+CONF_POLL_INTERVAL = "poll_interval"
+DEFAULT_POLL_INTERVAL = 5  # Minutes; passive cloud reads, never wake commands.
+MIN_POLL_INTERVAL = 5
+MAX_POLL_INTERVAL = 60
+STALE_AFTER_SECONDS = 15 * 60
