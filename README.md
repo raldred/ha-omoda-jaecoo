@@ -16,11 +16,31 @@ Requires **Home Assistant 2026.7.1 or newer** for the current native config-flow
 2. Copy **only** `custom_components/omoda_jaecoo/` into HA's configuration directory, resulting in `/config/custom_components/omoda_jaecoo/manifest.json`. Keep the folder name exactly `omoda_jaecoo`.
 3. Restart Home Assistant at a suitable time. Installation/restart is a deliberate user action, not something the probe performs.
 4. Go to **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
-5. Enter your account email, **account password**, and country dialling code.
-6. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
-7. Optionally enter the **separate vehicle control PIN**, or leave it blank. The PIN is **not verified during setup**. It is used only for explicit commands after you enable controls. No PIN request or physical command is sent simply by setting up or enabling the integration.
+5. Choose **Email address or Phone number**, then **Account password or One-time code**. All four combinations have native setup paths.
+6. Enter the registered identifier and country dialling code. For password sign-in, enter the masked account password. For OTP, explicitly confirm **Send a sign-in code**, then enter the masked email/SMS code. No message is sent just by opening a form.
+7. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
+8. Optionally enter the **separate vehicle control PIN**, or leave it blank. The PIN is **not verified during setup**. It is used only for explicit commands after you enable controls. No PIN request or physical command is sent simply by setting up or enabling the integration.
 
 HACS metadata is included for future distribution, but this repo is currently private; do not assume ordinary public HACS installation will work. Manual installation is the documented path. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
+
+### Four sign-in combinations
+
+| Identifier | Authentication | Delivery |
+|---|---|---|
+| Email | Password | No code requested |
+| Phone | Password | No code requested |
+| Email | One-time code | Email, explicitly requested |
+| Phone | One-time code | SMS, explicitly requested |
+
+Use the identifier **already registered in the official app**, not a new account address/number. Phone inputs accept national formatting and +/00 international formatting; the selected country must match. A phone-number library removes national trunk prefixes correctly and preserves significant zeros (for example Italy). This validates the format, not ownership/assignment; the server still authenticates the account.
+
+OTP delivery uses the app gateway's captcha create/check flow, then a single email/SMS request. Challenge images are processed off the HA event loop with strict size/work limits; no screenshots, codes or challenge secrets are persisted. Failed/ambiguous challenges do not trigger automatic retry loops. In particular, some SMS endpoints may refuse automated TLS clients: the flow reports this rather than weakening TLS or cycling clients to get around a refusal. Phone/password is an alternative that does not request SMS.
+
+You must explicitly request or resend a code. Resends wait at least **60 seconds** and honor a longer server `Retry-After`; authentication/discovery rate limits are also respected. After **three rejected code attempts**, request a fresh code instead of guessing. If a send response is ambiguous, the code-entry step remains available in case the message arrives. A discovery failure after authentication offers a read-only retry using the minted session—not another login or code submission.
+
+Your identifier and chosen method are saved for fixed-account reauthentication. **Passwords, OTPs and captcha material are not saved.** Normal startup/polling uses access/refresh tokens and never sends an OTP automatically. Old email/password entries retain their original IDs and continue working without migration or re-entry.
+
+Email/password login has been validated live on the reference vehicle. **The three new routes and captcha handling are protocol-backed and offline-tested, not yet live-verified on that account.** No real codes were sent during development. Only one setup should own a vehicle; logging in through another identifier for the same backend account may invalidate an existing app/HA session, and duplicate VINs are blocked before creating another entry.
 
 ### Native entities
 
@@ -75,11 +95,11 @@ A dedicated delegated account may reduce conflicts with the official app, but it
 
 ### Credentials and maintenance
 
-- The account password is used once in the flow and **never saved** in the config entry. Access/refresh tokens are saved for automatic refresh, including rotated tokens. If the session is revoked, HA offers native reauthentication for the same account.
+- The account password or OTP is used once and **never saved** in the config entry. Access/refresh tokens are saved for automatic refresh, including rotated tokens. If the session is revoked, HA offers native reauthentication for the same account and saved method. OTP reauthentication still requires an explicit request to send the code.
 - The control PIN is optional for telemetry. Use **Reconfigure** to replace/remove it; blank keeps the existing value and any safety block. Explicitly entering a PIN clears the local safety block, so check it in the app before doing so. Verification happens only on a user-requested command, never startup or polling.
 - HA config-entry storage/backups are **not automatically encrypted**. Protect saved tokens, optional PIN, account email and vehicle identifiers. Diagnostics expose only an allowlisted structural summary, not these values or raw telemetry/GPS.
 - Logging into the official app can invalidate the HA session and vice versa. The integration never saves your password for repeated automatic login attempts.
-- The private API uses a refresh-token query parameter (matching the upstream working protocol) over verified HTTPS. Integration exceptions do not expose URLs, and redirects are disabled. Treat HTTP debug/proxy traces as sensitive; do not publish them.
+- The private API uses query parameters for refresh tokens, email OTP exchange and captcha verification (matching the upstream working protocol), over verified HTTPS. Phone OTP and password grants use form bodies. Query values can be credential-equivalent even when encoded/encrypted. Integration exceptions do not expose URLs, and redirects are disabled. Treat HTTP debug/proxy traces as sensitive; do not publish them.
 - Removal/unloading stops coordinator polling; it does not issue a cloud logout that could affect other clients.
 - No mobile-app binaries, vendor MQTT certificates or client private keys are distributed.
 
@@ -145,7 +165,7 @@ Use `captures/` for **all** output files; this directory is gitignored. Files ar
 
 A parked car may return stale data, placeholder values or no telemetry. Do not treat a zero as an empty battery without checking its meaning. Units and sentinel values have not yet been validated. For a useful comparison, run while the car is already charging or awake, and compare against its display/the app without unnecessarily starting a competing app session. The probe **does not wake it**. Do not enable climate just to make this test pass without understanding the effect.
 
-If login fails, do not repeatedly retry. Confirm you can sign in normally, that the account has a password, and that it belongs to this app/backend. OTP/challenge flows, phone-number login, automatic token refresh and anti-bot workarounds are out of scope. Network errors and HTTP failures are reported without printing server bodies or raw exceptions that could disclose secrets.
+If login fails, do not repeatedly retry. Confirm you can sign in normally, that the account has a password, and that it belongs to this app/backend. For the **standalone probe**, OTP/challenge flows, phone-number login, automatic token refresh and anti-bot workarounds are out of scope; use the native HA flow for the additional sign-in methods. Network errors and HTTP failures are reported without printing server bodies or raw exceptions that could disclose secrets.
 
 Exit codes: `0` completed (or declined), `1` local/API failure, `2` usage error, `3` no recognized vehicle/telemetry payload, `130` cancelled. A successful fetch does not establish data freshness.
 
@@ -171,12 +191,13 @@ The compatibility suite also runs against HA 2026.7.1 (the reference installatio
 HA_TEST_VERSION=2026.7.1 HA_TEST_PLUGIN_VERSION=0.13.345 \
   uv run --no-project --python 3.14 \
   --with pytest-homeassistant-custom-component==0.13.345 \
+  --with phonenumbers==9.0.40 \
   pytest -c tests/ha/pyproject.toml -q tests/ha
 ```
 
 Tests use synthetic credentials and fake responses; real sockets are blocked. No live credentials belong in CI. HTTPS certificate/hostname verification remains enabled and redirects are disabled. Environment proxies and `.netrc` are deliberately ignored for this probe; no TLS-bypass switch is provided.
 
-The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, native sensors and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography dependencies. The standalone probe remains separate to avoid a dependency on HA.
+The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, native sensors and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography/Pillow dependencies. HA installs the declared `phonenumbers` requirement for country-aware phone formatting. No NumPy or browser automation is needed for OTP delivery. The standalone probe remains separate to avoid a dependency on HA.
 
 Before treating controls as production-ready, perform supervised model-specific PIN/permission, lock/unlock, climate and session tests. Terminal command acknowledgement remains unimplemented without the vendor MQTT channel. Never turn passive sensor refresh into an implicit climate/wake command.
 

@@ -3,10 +3,33 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect your Omoda / Jaecoo account",
-        "description": "For the European OMODA JAECOO app only (not CarLinko). Use your account password, not the vehicle control PIN. Signing in may disconnect the official app. Your password is used once and is not saved; session tokens are stored locally. Setup and polling only read cloud data. Remote commands are disabled by default and require separate opt-in after setup.",
-        "data": {"email": "Account email", "password": "Account password", "country_code": "Account country dialling code"},
-        "data_description": {"country_code": "Digits only, without +. For example, 44 for the UK. This does not change the EU backend."}
+        "title": "Choose how to sign in",
+        "description": "For the European OMODA JAECOO app only, not CarLinko. Choose the identifier registered to your account and how to authenticate. Signing in may disconnect the official app. Passwords and one-time codes are not saved; session tokens are stored locally. No vehicle command is sent during setup.",
+        "data": {"account_type": "Account identifier", "auth_method": "Sign-in method"}
+      },
+      "credentials": {
+        "title": "Your app account",
+        "description": "Use the email or phone number already registered in the official app. The account password, if requested, is NOT the vehicle-control PIN and is never saved. For one-time-code sign-in, the next screen asks you to confirm sending the code.",
+        "data": {"email": "Account email", "phone": "Account phone number", "password": "Account password", "country_code": "Account country dialling code"},
+        "data_description": {
+          "country_code": "Digits only, without +. For example, 44 for the UK. This does not change the EU backend.",
+          "phone": "National format or a full +/00 international number. The country code must match; significant leading zeros are handled automatically."
+        }
+      },
+      "request_code": {
+        "title": "Send a sign-in code",
+        "description": "Press Submit to request one code for {destination}. Nothing is sent just by opening this screen. HA first completes the gateway's verification challenge. If delivery is refused, do not repeatedly retry; use a password sign-in or the official app. Resends wait at least 60 seconds and respect the server's rate limit.",
+        "data": {}
+      },
+      "otp": {
+        "title": "Enter your sign-in code",
+        "description": "Enter the email or SMS code for {destination}. This is NOT the vehicle-control PIN. Codes expire, so use the latest code. Select Send a new code only if needed; no code is sent automatically. The code is used once and is not saved.",
+        "data": {"otp": "One-time code", "otp_action": "Action"}
+      },
+      "discovery": {
+        "title": "Find your vehicles",
+        "description": "A session has been obtained, but vehicle discovery could not finish. Submit retries vehicle discovery with that session; it does not repeat your password login or send another code. If the session has expired, cancel and start setup again.",
+        "data": {}
       },
       "vehicles": {
         "title": "Choose vehicles",
@@ -21,7 +44,7 @@
       },
       "reauth_confirm": {
         "title": "Sign in again",
-        "description": "The saved session for this account can no longer be used. Enter its account password again. This may disconnect the official app. Your selected vehicles and optional PIN are kept; the password is not saved.",
+        "description": "The saved session for {destination} can no longer be used. Enter its account password again. This may disconnect the official app. The account identity, selected vehicles and optional PIN are kept; the password is not saved.",
         "data": {"password": "Account password"}
       },
       "reconfigure": {
@@ -31,12 +54,20 @@
       }
     },
     "error": {
-      "invalid_auth": "Sign-in was rejected or the session expired. Check your account password and that you use the EU OMODA JAECOO app. Do not repeatedly retry. Accounts requiring a verification challenge are not supported yet.",
+      "invalid_auth": "Sign-in was rejected or the session expired. Check your account credentials and that you use the EU OMODA JAECOO app. Do not repeatedly retry.",
       "cannot_connect": "Unable to reach the cloud service. Check connectivity and try again later.",
       "rate_limited": "The service is limiting requests. Wait before trying again.",
       "api_error": "The service returned an unexpected response. No vehicle command was sent. Try again later or check compatibility with your app/region.",
       "no_vehicles": "No authorized vehicles were found. Check vehicle binding and account permissions in the official app.",
       "invalid_email": "Enter the email address used for your app account.",
+      "invalid_phone": "Enter a possible phone number for the selected country code. International prefixes must match that country; extensions are not supported.",
+      "invalid_method": "Choose one of the supported account and sign-in methods.",
+      "invalid_code": "The code is invalid, expired or was rejected. Use the latest code; do not enter the vehicle PIN.",
+      "too_many_attempts": "Too many rejected code attempts. Wait, then explicitly request a new code instead of guessing.",
+      "resend_cooldown": "Please wait before requesting another code (at least 60 seconds, or longer if the server requested it).",
+      "captcha_failed": "The gateway verification challenge could not be completed safely. No code request was sent. Try later or use password sign-in.",
+      "delivery_failed": "The service refused verification-code delivery. Check the registered identifier, wait, or use another sign-in method. The SMS service may refuse automated clients; TLS verification has not been weakened.",
+      "delivery_unknown": "Delivery could not be confirmed; a code may still arrive. Enter it if received, otherwise wait before explicitly resending.",
       "invalid_country": "Enter a country dialling code using 1–4 digits, without + or a leading zero.",
       "invalid_selection": "Select at least one of the discovered vehicles.",
       "invalid_pin": "Enter 4–8 digits, or leave the PIN blank. This is not your account password.",
@@ -46,6 +77,7 @@
       "already_configured": "This EU account is already configured.",
       "vehicle_already_configured": "A selected vehicle is already configured through another account. Keep only one integration entry per vehicle to avoid conflicting sessions and duplicate sensors.",
       "setup_expired": "Setup expired. Start again to sign in.",
+      "invalid_account_config": "Saved account details are invalid or unsupported. Set up the integration again with the account used by the app.",
       "reauth_successful": "Signed in again successfully.",
       "reconfigure_successful": "PIN settings updated. No PIN verification or vehicle command was sent.",
       "unique_id_mismatch": "Sign in with the same account used for this integration.",
@@ -66,6 +98,11 @@
       "pin_required": "Save the vehicle control PIN using Reconfigure before enabling controls.",
       "pin_blocked": "Controls are paused after an unsuccessful/inconclusive PIN check. Verify the correct PIN in the app, then re-enter it using Reconfigure."
     }
+  },
+  "selector": {
+    "account_type": {"options": {"email": "Email address", "phone": "Phone number"}},
+    "auth_method": {"options": {"password": "Account password", "otp": "One-time email or SMS code"}},
+    "otp_action": {"options": {"verify": "Verify code", "resend": "Send a new code"}}
   },
   "entity": {
     "sensor": {

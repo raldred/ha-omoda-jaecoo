@@ -1,4 +1,4 @@
-"""Read-only async EU Omoda/Jaecoo API, independent of Home Assistant.
+"""Account authentication and read-only vehicle API, independent of Home Assistant.
 
 Protocol reference: chery-connect-ha/omoda9-ha, revision
 7d80cd6a7215168f58d147cbd475c82e52cd3944. See THIRD_PARTY_NOTICES.md.
@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import importlib
 import math
 import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import aiohttp
@@ -65,6 +67,39 @@ class CannotConnect(ApiError):
 
 class RateLimitError(ApiError):
     """The backend asked the caller to slow down."""
+
+    def __init__(self, *args: Any, retry_after: float | None = None) -> None:
+        super().__init__(*args)
+        self.retry_after = retry_after
+
+
+class CaptchaError(ApiError):
+    """The one-attempt backend captcha could not be confirmed."""
+
+
+class OtpDeliveryError(ApiError):
+    """Known code-delivery rejection or unsupported backend challenge."""
+
+
+class OtpDeliveryUnknown(ApiError):
+    """A send was attempted but delivery was not confirmed; a code may arrive."""
+
+
+def _retry_after(value: Any) -> float | None:
+    """Parse Retry-After seconds or HTTP date without exposing header text."""
+    if not isinstance(value, str):
+        return None
+    try:
+        seconds = float(value)
+    except (ValueError, OverflowError):
+        try:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                return None
+            seconds = date.timestamp() - time.time()
+        except (ValueError, TypeError, OverflowError):
+            return None
+    return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
 def _text(value: Any) -> str | None:
@@ -302,7 +337,12 @@ class JaecooApi:
             ) as response:
                 # HTTP status takes precedence over arbitrary JSON messages.
                 if response.status == 429:
-                    raise RateLimitError("Backend rate limit reached.")
+                    raise RateLimitError(
+                        "Backend rate limit reached.",
+                        retry_after=_retry_after(
+                            getattr(response, "headers", {}).get("Retry-After")
+                        ),
+                    )
                 if response.status >= 500:
                     raise CannotConnect("Backend is temporarily unavailable.")
                 if account_route and response.status in (401, 424):
@@ -326,7 +366,12 @@ class JaecooApi:
                     raise ApiError("Backend rejected the request.")
                 code = result.get("code")
                 if str(code) == "429":
-                    raise RateLimitError("Backend rate limit reached.")
+                    raise RateLimitError(
+                        "Backend rate limit reached.",
+                        retry_after=_retry_after(
+                            getattr(response, "headers", {}).get("Retry-After")
+                        ),
+                    )
                 if route == "realtime" and code == "A07900":
                     return {}
                 if account_route and str(code) in ("401", "424"):
@@ -383,6 +428,58 @@ class JaecooApi:
                     "needDecode": "1",
                     "loginType": "email",
                 },
+            )
+            self._vehicles = {}
+            return self._accept_tokens(result)
+
+    async def async_login_phone(self, phone: str, password: str) -> TokenSet:
+        """One phone/password grant, with canonical national digits in the body."""
+        identity = await asyncio.to_thread(
+            importlib.import_module, ".identity", __package__
+        )
+        national = await asyncio.to_thread(
+            identity.normalize_phone, phone, self._country_code
+        )
+        if not isinstance(password, str) or not password:
+            raise AuthenticationError("An account password is required.")
+        async with self._refresh_lock:
+            result = await self._post(
+                "token",
+                _bff_headers(TOKEN_PATH, self._country_code),
+                data={
+                    "username": national,
+                    "password": _encode_password(password),
+                    "grant_type": "password",
+                    "scope": "server",
+                    "needDecode": "1",
+                    "loginType": "mobile",
+                    "areaCode": self._country_code,
+                },
+            )
+            self._vehicles = {}
+            return self._accept_tokens(result)
+
+    async def async_request_otp(self, identifier: str, account_type: str) -> None:
+        """Explicit, single-attempt delivery; never called by refresh or polling."""
+        otp = await asyncio.to_thread(importlib.import_module, ".otp", __package__)
+        await otp.request_otp(
+            self._session, identifier, account_type, self._country_code
+        )
+
+    async def async_login_otp(
+        self, identifier: str, code: str, account_type: str
+    ) -> TokenSet:
+        """One verification grant; no code, password or challenge is retained."""
+        otp = await asyncio.to_thread(importlib.import_module, ".otp", __package__)
+        fields = await asyncio.to_thread(
+            otp.token_fields, identifier, code, account_type, self._country_code
+        )
+        location = "data" if account_type == "phone" else "params"
+        async with self._refresh_lock:
+            result = await self._post(
+                "token",
+                _bff_headers(TOKEN_PATH, self._country_code),
+                **{location: fields},
             )
             self._vehicles = {}
             return self._accept_tokens(result)

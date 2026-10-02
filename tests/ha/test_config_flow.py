@@ -28,8 +28,13 @@ async def start(hass):
 
 
 async def login(hass, result, email=EMAIL):
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"account_type": "email", "auth_method": "password"}
+    )
+    assert_native_form(result, "credentials")
     return await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"email": email, "password": PASSWORD}
+        result["flow_id"],
+        {"email": email, "password": PASSWORD, "country_code": "44"},
     )
 
 
@@ -40,8 +45,20 @@ async def test_native_account_vehicle_and_masked_pin_forms(
     with patch(f"custom_components.{DOMAIN}.async_setup_entry", return_value=True):
         result = await start(hass)
         schema = assert_native_form(result, "user")
+        assert {str(key) for key in schema} == {"account_type", "auth_method"}
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account_type": "email", "auth_method": "password"}
+        )
+        schema = assert_native_form(result, "credentials")
         assert schema_value(schema, "password").config["type"] == "password"
-        result = await login(hass, result, "  OWNER@EXAMPLE.INVALID  ")
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "email": "  OWNER@EXAMPLE.INVALID  ",
+                "password": PASSWORD,
+                "country_code": "44",
+            },
+        )
         vehicle_schema = assert_native_form(result, "vehicles")
         selection = next(key for key in vehicle_schema if str(key) == "selected_vins")
         assert selection.default() == [VIN, VIN_2]
@@ -98,8 +115,9 @@ async def test_single_vehicle_skips_selection_and_pin_is_optional(
 async def test_login_errors(hass, mock_api, api_types, exception, error):
     mock_api.async_login.side_effect = getattr(api_types, exception)()
     result = await login(hass, await start(hass))
-    assert_native_form(result, "user")
+    assert_native_form(result, "credentials")
     assert result["errors"] == {"base": error}
+    assert PASSWORD not in repr(result["data_schema"])
     mock_api.async_list_vehicles.assert_not_awaited()
     assert not hass.config_entries.async_entries(DOMAIN)
 
@@ -107,7 +125,7 @@ async def test_login_errors(hass, mock_api, api_types, exception, error):
 async def test_no_vehicles(hass, mock_api):
     mock_api.async_list_vehicles.return_value = []
     result = await login(hass, await start(hass))
-    assert_native_form(result, "user")
+    assert_native_form(result, "discovery")
     assert result["errors"] == {"base": "no_vehicles"}
     assert not hass.config_entries.async_entries(DOMAIN)
 
@@ -120,7 +138,10 @@ async def test_duplicate_account(hass, mock_api):
         )
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
         assert result["type"] is FlowResultType.CREATE_ENTRY
+        mock_api.reset_mock()
         result = await login(hass, await start(hass), "OWNER@EXAMPLE.INVALID")
+        mock_api.async_login.assert_not_awaited()
+        mock_api.async_list_vehicles.assert_not_awaited()
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "already_configured"
         assert len(hass.config_entries.async_entries(DOMAIN)) == 1
@@ -162,6 +183,13 @@ async def test_invalid_vehicle_selection(hass, mock_api):
 
 async def test_reauth_fixed_account_preserves_pin(hass, mock_api, api_types, entry):
     entry.add_to_hass(hass)
+    # This is deliberately a legacy entry with no account/auth metadata.
+    hass.config_entries.async_update_entry(
+        entry,
+        data={**entry.data, "pin_blocked": True},
+        options={"poll_interval": 15, "enable_controls": True, "climate_duration": 12},
+    )
+    options_before = dict(entry.options)
     replacement = api_types.TokenSet(
         "replacement-access", "replacement-refresh", 4102444800.0
     )
@@ -178,8 +206,12 @@ async def test_reauth_fixed_account_preserves_pin(hass, mock_api, api_types, ent
     assert result["reason"] == "reauth_successful"
     mock_api.async_login.assert_awaited_once_with(EMAIL, PASSWORD)
     assert entry.data["tokens"] == replacement.to_dict()
+    assert entry.data["account_type"] == "email"
+    assert entry.data["auth_method"] == "password"
     assert entry.data["control_pin"] == PIN
+    assert entry.data["pin_blocked"] is True
     assert entry.data["selected_vins"] == [VIN]
+    assert entry.options == options_before
     assert PASSWORD not in repr(entry.data)
     reload.assert_awaited_once_with(entry.entry_id)
 
@@ -251,6 +283,9 @@ async def test_options_poll_interval(hass, entry, mock_api):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options["poll_interval"] == 15
     mock_api.async_login.assert_not_awaited()
+    mock_api.async_login_phone.assert_not_awaited()
+    mock_api.async_login_otp.assert_not_awaited()
+    mock_api.async_request_otp.assert_not_awaited()
     mock_api.async_realtime.assert_not_awaited()
 
 
@@ -292,4 +327,7 @@ async def test_reconfigure_pin_update_and_clear(hass, entry, mock_api, pin):
     for key in ("email", "tokens", "vehicles", "selected_vins"):
         assert entry.data[key] == before[key]
     mock_api.async_login.assert_not_awaited()
+    mock_api.async_login_phone.assert_not_awaited()
+    mock_api.async_login_otp.assert_not_awaited()
+    mock_api.async_request_otp.assert_not_awaited()
     mock_api.async_realtime.assert_not_awaited()

@@ -89,6 +89,24 @@ def mock_api(api_types, tokens, vehicles):
 
 
 @pytest.fixture
+def auth_api(mock_api, tokens):
+    """All login methods update the token property, without making any requests."""
+
+    def login(method):
+        async def authenticated(*args, **kwargs):
+            mock_api.tokens = method.return_value
+            return mock_api.tokens
+
+        return authenticated
+
+    for method in (mock_api.async_login_phone, mock_api.async_login_otp):
+        method.return_value = tokens
+        method.side_effect = login(method)
+    mock_api.async_request_otp.return_value = None
+    return mock_api
+
+
+@pytest.fixture
 def entry(tokens, vehicles):
     """One account, two discovered vehicles, one explicitly selected vehicle."""
     return MockConfigEntry(

@@ -592,12 +592,15 @@ def test_cancellation_propagates_without_auth_conversion():
     assert obj.tokens == TOKENS
 
 
-def test_public_async_surface_is_read_only():
+def test_public_async_surface_has_explicit_auth_but_no_vehicle_writes():
     assert {name for name in dir(api.JaecooApi) if name.startswith("async_")} == {
         "async_login",
         "async_list_vehicles",
         "async_realtime",
         "async_control_session",
+        "async_login_phone",
+        "async_request_otp",
+        "async_login_otp",
     }
     assert set(api.ALLOWED_ROUTES) == {"token", "vehicles", "tsp_login", "realtime"}
 

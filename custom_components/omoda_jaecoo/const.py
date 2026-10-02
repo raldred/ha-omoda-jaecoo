@@ -2,6 +2,13 @@
 
 DOMAIN = "omoda_jaecoo"
 CONF_EMAIL = "email"
+CONF_PHONE = "phone"
+CONF_ACCOUNT_TYPE = "account_type"
+CONF_AUTH_METHOD = "auth_method"
+CONF_OTP = "otp"
+CONF_OTP_ACTION = "otp_action"
+OTP_RESEND_SECONDS = 60
+OTP_MAX_ATTEMPTS = 3
 CONF_COUNTRY_CODE = "country_code"
 CONF_TOKENS = "tokens"
 CONF_VEHICLES = "vehicles"

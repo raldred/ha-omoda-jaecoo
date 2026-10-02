@@ -1,13 +1,15 @@
 # Third-party notices
 
-The EU password encoding, BFF header/signature format, token-refresh grant, TSP realtime request signature, and endpoint configuration in `probe.py`, `custom_components/omoda_jaecoo/api.py` and `commands.py` were implemented with reference to:
+The EU password encoding, BFF header/signature format, token-refresh grant, TSP realtime request signature, and endpoint configuration in `probe.py` and `custom_components/omoda_jaecoo/{api,commands,otp,captcha}.py` were implemented with reference to:
 
 - Project: chery-connect-ha/omoda9-ha (originally Caslinovich/omoda9-ha)
 - Source: https://github.com/chery-connect-ha/omoda9-ha
 - Revision: 7d80cd6a7215168f58d147cbd475c82e52cd3944
-- Relevant files: `core/prova_token.py`, `core/omoda_auth.py`, `core/tsp_sign.py`, `core/wake.py`, `core/provision.py`, `core/commands.py`, `core/permessi.py` under `custom_components/omoda9/`.
+- Relevant files: `core/prova_token.py`, `core/omoda_auth.py`, `core/tsp_sign.py`, `core/wake.py`, `core/provision.py`, `core/commands.py`, `core/permessi.py`, `core/login_omoda.py`, `core/captcha_solver.py` under `custom_components/omoda9/`.
 
 No mobile-app archive, decompiled source, certificate or client private key is included. The upstream software license does not grant rights to redistribute third-party app binaries or certificate material.
+
+The captcha outline-matching approach follows the upstream solver, reimplemented with Pillow/standard Python and bounded image/work limits instead of NumPy/OpenCV. Code requests are explicit, single-attempt operations. The `phonenumbers` dependency is obtained separately from PyPI under its own Apache-2.0 license; its source/database is not vendored here.
 
 ## Manufacturer-owned app icon (not MIT-licensed)
 
