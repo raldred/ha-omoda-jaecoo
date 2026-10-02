@@ -52,6 +52,8 @@ Each selected vehicle gets a device with:
 | Electric range | `dynamicPureElectricRange` (fallback `electricRange`/`pureElectricRange`), km | Miles |
 | Odometer | `odometer`, km | Miles |
 | Cabin temperature | `inCarTemperature` | HA temperature unit preference |
+| Charging status | Cable and charge-state codes | Unplugged / Plugged in / Charging, or unknown |
+| Reported speed | `vehicleSpeed`, km/h | mph |
 | Vehicle report time | Explicit-zone/epoch source timestamp, if understood | Timestamp or unknown |
 | Cloud last checked | Time HA fetched the cloud snapshot | Timestamp |
 | Telemetry freshness | Source timestamp age / snapshot status | Current, stale, unknown, no snapshot or unreliable |
@@ -63,6 +65,33 @@ Each selected vehicle gets a device with:
 Cloud reads default to **every 5 minutes**, configurable from 5–60 minutes under the integration's options. HTTP rate limiting backs polling off up to an hour. This is a conservative implementation choice, not a published vendor allowance. No wake/locate command, MQTT connection or automatic climate activation is involved. Empty/asleep replies retain previous measurements in memory but show **No snapshot returned**. Network failures make entities unavailable. A successful cloud read can still contain an old snapshot.
 
 A report time without a timezone is **not guessed**. Unrecognized/missing source timestamps produce **Observation time unknown**. Source timestamps older than 15 minutes are labelled stale. This label is based on the timestamp returned by the service, not independent verification of individual sensors. **Cloud last checked is never presented as the vehicle's observation time.**
+
+### More read-only entities
+
+The update also registers **disabled-by-default** sensors for HV battery voltage/current, direct reported charging power, and driver/passenger/rear seat heating and ventilation levels. Extra binary sensors cover the four windows, sunroof, windscreen defrost, heated windscreen, rear-window heating and steering-wheel heating.
+
+Enable the ones relevant to your car from its **Entities** list. Their presence in a generic SDK payload does **not** establish that the hardware is fitted. Seat levels remain numeric values as reported, not invented Low/Medium/High labels. Only known 0/1 window/comfort states are decoded; unexpected states remain unknown. Speed uses native km/h with mph suggested initially, and respects HA unit overrides. HV `0 V` and `-1000 A` placeholders are rejected; current sign is preserved and never used to infer that the car is plugged in or charging.
+
+Tyre readings have **not** been added based on the pressure-unit flag alone—we need the actual values and scale for this vehicle. These added entities do not send seat/window/charging commands.
+
+### Charging status, schedule, target and ETA
+
+The primary **Charging status** entity combines `chargeGunState` and `chargeState`, rather than equating a connected cable with charging. Initial decoding follows the community's 0/1 convention: 0/0 → Unplugged, 1/0 → Plugged in, 1/1 → Charging. **Only the idle 0/0 sample was captured on the reference vehicle; compare the nonzero states with the app.** Other codes—including a possible completion code 2—are not guessed. Missing/conflicting codes produce unknown. Numeric raw plug/charge/fast-connector/schedule codes are exposed as attributes for validation.
+
+- **Reported charging power:** uses `chargingPower` directly as kW (community mapping), only when charging is reported. It is disabled by default and still needs comparison with the app on this vehicle. Missing is not zero; no `voltage × current` estimate or claim of mains/grid input power is made.
+- **Remaining time / ETA:** the raw `remainChargeTime` diagnostic is disabled by default. Its unit has not yet been verified here. Compare it with the app while charging, then choose **Minutes** or **Seconds** in the integration's decoder options. This adds a native duration sensor and estimated-finish timestamp. ETA requires a known, nonfuture observation time no older than 15 minutes; it is anchored to that sample, **not now plus a stale duration**. A missing/ambiguous timestamp keeps ETA unknown.
+- **Schedule:** enable **Read experimental charging settings** to query the app SDK's schedule endpoint. The sensor reports the main switch and all returned plans (start time, duration and raw repeat-day codes). Start/duration use the upstream minute-based interpretation. Times are shown as reported local times; no timezone, weekday mapping or next-start timestamp is invented. Missing data is not an empty/disabled schedule. This is the **vehicle's own schedule**, not a charger/Ohme or Octopus smart-charging plan. These queries have not been live-validated on the reference vehicle.
+- **Target %:** the SDK's charging-depth query is a candidate, not proven target SoC. Its raw diagnostic is disabled by default. **Only after comparing it with the car's actual target**, enable **Charging depth is a verified target percentage** to create a % sensor; values outside 0–100 remain unknown. This is a local decoder option, **not a charge-limit setter**. No default target is fabricated.
+
+Experimental schedule/depth reads run at most every 15 minutes. They are independent, background reads so they cannot delay lock feedback or break battery/range updates when unsupported. Explicit optional-endpoint failures are retried no sooner than an hour; empty/asleep data and transient connection failures use the normal optional cadence. Rate limits pause the optional batch. Nothing changes the car's charge target, schedule or start/stop state.
+
+### Optional vehicle location
+
+Enable **Record last-reported vehicle location** in options to create a native map tracker. It calls **queryVehicleLocation**, not the separate locate/wake command. The API is asked for existing location data at most every five minutes when normal polling runs; lock/climate fast checks do not repeatedly query GPS. Optional reads are asynchronous and cannot hold up the main telemetry refresh.
+
+The tracker validates coordinate ranges, rejects placeholder 0,0 and does not guess scaled coordinates or restore an old point after a failed read. It is labelled **Last reported location**, not live GPS. Only explicit GPS/position timestamps are treated as fix times; general vehicle timestamps are not substituted. Location may be stale or have unknown age—do not use it alone for automatic unlocking/security decisions.
+
+**Privacy:** off by default, with no location query, tracker, or coordinate storage in coordinator state while disabled. Enabling it records coordinates in HA state/history/backups. Turning it off stops new tracking but does not erase history. Diagnostics never include GPS coordinates, account details or raw responses.
 
 ### Door/climate state and automation triggers
 
@@ -197,7 +226,7 @@ HA_TEST_VERSION=2026.7.1 HA_TEST_PLUGIN_VERSION=0.13.345 \
 
 Tests use synthetic credentials and fake responses; real sockets are blocked. No live credentials belong in CI. HTTPS certificate/hostname verification remains enabled and redirects are disabled. Environment proxies and `.netrc` are deliberately ignored for this probe; no TLS-bypass switch is provided.
 
-The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, native sensors and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography/Pillow dependencies. HA installs the declared `phonenumbers` requirement for country-aware phone formatting. No NumPy or browser automation is needed for OTP delivery. The standalone probe remains separate to avoid a dependency on HA.
+The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, a pure telemetry parser, native sensor/binary-sensor/control/tracker platforms and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography/Pillow dependencies. HA installs the declared `phonenumbers` requirement for country-aware phone formatting. No NumPy or browser automation is needed for OTP delivery. The standalone probe remains separate to avoid a dependency on HA.
 
 Before treating controls as production-ready, perform supervised model-specific PIN/permission, lock/unlock, climate and session tests. Terminal command acknowledgement remains unimplemented without the vendor MQTT channel. Never turn passive sensor refresh into an implicit climate/wake command.
 

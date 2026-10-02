@@ -41,6 +41,9 @@ ALLOWED_ROUTES = {
     "vehicles": (BFF, VEHICLES_PATH),
     "tsp_login": (BFF, TSP_LOGIN_PATH),
     "realtime": (TSP, REALTIME_PATH),
+    "location": (TSP, "/asc/vehicleControl/queryVehicleLocation"),
+    "charge_schedule": (TSP, "/asd/chargeAppointManage/chargeAppointQuery"),
+    "charge_depth": (TSP, "/asd/chargeDepthManage/chargeDepthQuery"),
 }
 _VEHICLE_LIST_KEYS = (
     "controlCarList",
@@ -372,7 +375,10 @@ class JaecooApi:
                             getattr(response, "headers", {}).get("Retry-After")
                         ),
                     )
-                if route == "realtime" and code == "A07900":
+                if (
+                    route in {"realtime", "location", "charge_schedule", "charge_depth"}
+                    and code == "A07900"
+                ):
                     return {}
                 if account_route and str(code) in ("401", "424"):
                     raise AuthenticationError("Account session was rejected.")
@@ -689,3 +695,42 @@ class JaecooApi:
                 self._tsp_login_confirmed = False
             raise
         return _payload(result)
+
+    async def _optional_vehicle_query(
+        self, vin: str, route: str
+    ) -> dict[str, Any] | None:
+        """One cached-data query; no PIN, command, wake fallback or retry.
+
+        Unsupported optional endpoints must not invalidate an otherwise working
+        vehicle session. Regular realtime auth recovery remains unchanged.
+        """
+        if route not in {"location", "charge_schedule", "charge_depth"}:
+            raise ApiError("Endpoint is not an optional read query.")
+        self.get_vehicle(vin)
+        await self._ensure_tsp_login()
+        assert self._user_token is not None
+        ts = int(time.time() * 1000)
+        result = await self._post(
+            route,
+            {
+                "Authorization": self._user_token,
+                "timestamp": str(ts),
+                "x-TenantId": "",
+                "Content-Type": "application/json; charset=UTF-8",
+                "Accept": "application/json",
+                "User-Agent": "okhttp/4.9.0",
+                "version": APP_VERSION,
+                "agent": "android",
+            },
+            json=_realtime_body(vin, ts),
+        )
+        return _payload(result) or None
+
+    async def async_location(self, vin: str) -> dict[str, Any] | None:
+        return await self._optional_vehicle_query(vin, "location")
+
+    async def async_charge_schedule(self, vin: str) -> dict[str, Any] | None:
+        return await self._optional_vehicle_query(vin, "charge_schedule")
+
+    async def async_charge_depth(self, vin: str) -> dict[str, Any] | None:
+        return await self._optional_vehicle_query(vin, "charge_depth")

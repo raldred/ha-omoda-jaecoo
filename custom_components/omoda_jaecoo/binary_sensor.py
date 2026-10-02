@@ -13,6 +13,20 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entity import OmodaJaecooEntity
 
+EXTRA_KEYS = frozenset(
+    {
+        "window_front_left",
+        "window_front_right",
+        "window_rear_left",
+        "window_rear_right",
+        "sunroof_open",
+        "windscreen_defrost",
+        "heated_windscreen",
+        "rear_defrost",
+        "steering_wheel_heat",
+    }
+)
+
 DESCRIPTIONS = (
     BinarySensorEntityDescription(
         key="door_lock",
@@ -34,6 +48,36 @@ DESCRIPTIONS = (
             "door_rear_left",
             "door_rear_right",
             "boot",
+        )
+    ),
+    *(
+        BinarySensorEntityDescription(
+            key=key,
+            translation_key=key,
+            device_class=BinarySensorDeviceClass.WINDOW,
+            entity_registry_enabled_default=False,
+        )
+        for key in (
+            "window_front_left",
+            "window_front_right",
+            "window_rear_left",
+            "window_rear_right",
+            "sunroof_open",
+        )
+    ),
+    *(
+        BinarySensorEntityDescription(
+            key=key,
+            translation_key=key,
+            device_class=BinarySensorDeviceClass.RUNNING,
+            entity_registry_enabled_default=False,
+            icon=icon,
+        )
+        for key, icon in (
+            ("windscreen_defrost", "mdi:car-defrost-front"),
+            ("heated_windscreen", "mdi:car-defrost-front"),
+            ("rear_defrost", "mdi:car-defrost-rear"),
+            ("steering_wheel_heat", "mdi:steering"),
         )
     ),
 )
@@ -68,4 +112,6 @@ class OmodaJaecooBinarySensor(OmodaJaecooEntity, BinarySensorEntity):
             return None if snapshot.door_locked is None else not snapshot.door_locked
         if key == "climate_running":
             return snapshot.climate_on
+        if key in EXTRA_KEYS:
+            return getattr(snapshot, "extras", {}).get(key)
         return snapshot.doors.get(key.removeprefix("door_"))

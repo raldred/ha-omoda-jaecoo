@@ -601,8 +601,19 @@ def test_public_async_surface_has_explicit_auth_but_no_vehicle_writes():
         "async_login_phone",
         "async_request_otp",
         "async_login_otp",
+        "async_location",
+        "async_charge_schedule",
+        "async_charge_depth",
     }
-    assert set(api.ALLOWED_ROUTES) == {"token", "vehicles", "tsp_login", "realtime"}
+    assert set(api.ALLOWED_ROUTES) == {
+        "token",
+        "vehicles",
+        "tsp_login",
+        "realtime",
+        "location",
+        "charge_schedule",
+        "charge_depth",
+    }
 
 
 def test_block_unknown_route_and_country():

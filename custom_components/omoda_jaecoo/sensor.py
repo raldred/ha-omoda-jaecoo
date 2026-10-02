@@ -12,16 +12,40 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
     UnitOfLength,
+    UnitOfPower,
+    UnitOfSpeed,
     UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    CONF_CHARGE_DEPTH_IS_TARGET,
+    CONF_CHARGE_TIME_UNIT,
+    CONF_ENABLE_CHARGING_DETAILS,
+    DOMAIN,
+)
 from .coordinator import OmodaJaecooCoordinator
+
+SEAT_KEYS = tuple(
+    f"{seat}_seat_{kind}"
+    for seat in ("driver", "passenger", "rear_left", "rear_right", "rear_centre")
+    for kind in ("heat", "vent")
+)
+EXTRA_KEYS = frozenset({"speed", "hv_voltage", "hv_current", *SEAT_KEYS})
+CHARGING_KEYS = {
+    "charging_status": "status",
+    "charging_power": "power_kw",
+    "charge_time_remaining_raw": "remaining_raw",
+    "charge_time_remaining": "remaining_minutes",
+    "charging_eta": "estimated_finish",
+}
 
 DESCRIPTIONS = (
     SensorEntityDescription(
@@ -76,6 +100,104 @@ DESCRIPTIONS = (
         ],
     ),
     SensorEntityDescription(
+        key="charging_status",
+        translation_key="charging_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=["unplugged", "plugged_in", "charging"],
+        icon="mdi:ev-station",
+    ),
+    SensorEntityDescription(
+        key="charging_power",
+        translation_key="charging_power",
+        device_class=SensorDeviceClass.POWER,
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        suggested_unit_of_measurement=UnitOfPower.KILO_WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="charge_time_remaining_raw",
+        translation_key="charge_time_remaining_raw",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        icon="mdi:timer-outline",
+    ),
+    SensorEntityDescription(
+        key="charge_time_remaining",
+        translation_key="charge_time_remaining",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="charging_eta",
+        translation_key="charging_eta",
+        device_class=SensorDeviceClass.TIMESTAMP,
+    ),
+    SensorEntityDescription(
+        key="charging_depth_raw",
+        translation_key="charging_depth_raw",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="charge_target",
+        translation_key="charge_target",
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
+        icon="mdi:battery-lock",
+    ),
+    SensorEntityDescription(
+        key="charge_schedule",
+        translation_key="charge_schedule",
+        device_class=SensorDeviceClass.ENUM,
+        options=["enabled", "disabled"],
+        icon="mdi:calendar-clock",
+    ),
+    SensorEntityDescription(
+        key="speed",
+        translation_key="speed",
+        device_class=SensorDeviceClass.SPEED,
+        native_unit_of_measurement=UnitOfSpeed.KILOMETERS_PER_HOUR,
+        suggested_unit_of_measurement=UnitOfSpeed.MILES_PER_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+    ),
+    SensorEntityDescription(
+        key="hv_voltage",
+        translation_key="hv_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    SensorEntityDescription(
+        key="hv_current",
+        translation_key="hv_current",
+        device_class=SensorDeviceClass.CURRENT,
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    *(
+        SensorEntityDescription(
+            key=key,
+            translation_key=key,
+            suggested_display_precision=0,
+            entity_registry_enabled_default=False,
+            icon="mdi:car-seat-heater"
+            if key.endswith("heat")
+            else "mdi:car-seat-cooler",
+        )
+        for key in SEAT_KEYS
+    ),
+    SensorEntityDescription(
         key="observed_at",
         translation_key="observed_at",
         device_class=SensorDeviceClass.TIMESTAMP,
@@ -105,7 +227,23 @@ async def async_setup_entry(
         OmodaJaecooSensor(coordinator, vin, description)
         for vin in coordinator.selected_vins
         for description in DESCRIPTIONS
-        if description.key != "command_status" or coordinator.controls_enabled
+        if (description.key != "command_status" or coordinator.controls_enabled)
+        and (
+            description.key not in ("charge_time_remaining", "charging_eta")
+            or coordinator.options.get(CONF_CHARGE_TIME_UNIT, "unverified")
+            in ("minutes", "seconds")
+        )
+        and (
+            description.key not in ("charge_schedule", "charging_depth_raw")
+            or coordinator.options.get(CONF_ENABLE_CHARGING_DETAILS, False)
+        )
+        and (
+            description.key != "charge_target"
+            or (
+                coordinator.options.get(CONF_ENABLE_CHARGING_DETAILS, False)
+                and coordinator.options.get(CONF_CHARGE_DEPTH_IS_TARGET, False)
+            )
+        )
     )
 
 
@@ -142,9 +280,63 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
     def native_value(self):
         if self.entity_description.key == "command_status":
             return self.coordinator.last_command_status.get(self._vin, "not_requested")
+        key = self.entity_description.key
+        if key == "charge_schedule":
+            schedule = self.coordinator.schedules.get(self._vin)
+            return ("enabled" if schedule.enabled else "disabled") if schedule else None
+        if key in ("charging_depth_raw", "charge_target"):
+            depth = self.coordinator.charge_depths.get(self._vin)
+            return (
+                depth
+                if key == "charging_depth_raw" or depth is None or 0 <= depth <= 100
+                else None
+            )
         snapshot = (self.coordinator.data or {}).get(self._vin)
         if snapshot is None:
             return None
-        if self.entity_description.key == "freshness":
+        if key == "freshness":
             return snapshot.freshness()
-        return getattr(snapshot, self.entity_description.key)
+        if key in EXTRA_KEYS:
+            return snapshot.extras.get(key)
+        if key in CHARGING_KEYS:
+            return (
+                getattr(snapshot.charging, CHARGING_KEYS[key])
+                if snapshot.charging
+                else None
+            )
+        return getattr(snapshot, key)
+
+    @property
+    def extra_state_attributes(self):
+        key = self.entity_description.key
+        if key == "charging_status":
+            snapshot = (self.coordinator.data or {}).get(self._vin)
+            charging = snapshot.charging if snapshot else None
+            if charging:
+                return {
+                    "plug_code": charging.plug_code,
+                    "charge_code": charging.charge_code,
+                    "fast_connector_code": charging.fast_code,
+                    "schedule_code": charging.schedule_code,
+                }
+        if key == "charge_schedule":
+            schedule = self.coordinator.schedules.get(self._vin)
+            if schedule:
+                return {
+                    "time_basis": "reported local time; timezone unverified",
+                    "plan_count": len(schedule.plans),
+                    "plans": [
+                        {
+                            "enabled": plan.enabled,
+                            "start_time": f"{plan.start_minutes // 60:02d}:{plan.start_minutes % 60:02d}"
+                            if plan.start_minutes is not None
+                            else None,
+                            "duration_minutes": plan.duration_minutes,
+                            "repeat_day_codes": list(plan.cycle_codes)
+                            if plan.cycle_codes is not None
+                            else None,
+                        }
+                        for plan in schedule.plans
+                    ],
+                }
+        return None

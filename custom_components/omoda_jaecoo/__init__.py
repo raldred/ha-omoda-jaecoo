@@ -13,7 +13,13 @@ from .commands import CommandClient
 from .const import CONF_COUNTRY_CODE, CONF_TOKENS
 from .coordinator import OmodaJaecooCoordinator
 
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.LOCK, Platform.CLIMATE]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.LOCK,
+    Platform.CLIMATE,
+    Platform.DEVICE_TRACKER,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

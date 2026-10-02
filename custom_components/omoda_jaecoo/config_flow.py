@@ -30,12 +30,16 @@ from .api import (
 from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_AUTH_METHOD,
+    CONF_CHARGE_DEPTH_IS_TARGET,
+    CONF_CHARGE_TIME_UNIT,
     CONF_CLEAR_PIN,
     CONF_CLIMATE_DURATION,
     CONF_CONTROL_PIN,
     CONF_COUNTRY_CODE,
     CONF_EMAIL,
+    CONF_ENABLE_CHARGING_DETAILS,
     CONF_ENABLE_CONTROLS,
+    CONF_ENABLE_LOCATION,
     CONF_OTP,
     CONF_OTP_ACTION,
     CONF_PHONE,
@@ -610,7 +614,15 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                 duration = user_input.get(
                     CONF_CLIMATE_DURATION, DEFAULT_CLIMATE_DURATION
                 )
-                if enabled and not self.config_entry.data.get(CONF_CONTROL_PIN):
+                location = user_input.get(CONF_ENABLE_LOCATION, False)
+                details = user_input.get(CONF_ENABLE_CHARGING_DETAILS, False)
+                time_unit = user_input.get(CONF_CHARGE_TIME_UNIT, "unverified")
+                depth_target = user_input.get(CONF_CHARGE_DEPTH_IS_TARGET, False)
+                if time_unit not in ("unverified", "minutes", "seconds"):
+                    errors[CONF_CHARGE_TIME_UNIT] = "invalid_time_unit"
+                elif depth_target and not details:
+                    errors["base"] = "charging_details_required"
+                elif enabled and not self.config_entry.data.get(CONF_CONTROL_PIN):
                     errors["base"] = "pin_required"
                 elif enabled and self.config_entry.data.get(CONF_PIN_BLOCKED):
                     errors["base"] = "pin_blocked"
@@ -628,6 +640,10 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                             CONF_POLL_INTERVAL: int(value),
                             CONF_ENABLE_CONTROLS: bool(enabled),
                             CONF_CLIMATE_DURATION: int(duration),
+                            CONF_ENABLE_LOCATION: bool(location),
+                            CONF_ENABLE_CHARGING_DETAILS: bool(details),
+                            CONF_CHARGE_TIME_UNIT: time_unit,
+                            CONF_CHARGE_DEPTH_IS_TARGET: bool(depth_target),
                         },
                     )
             else:
@@ -650,6 +666,35 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                             unit_of_measurement="min",
                         )
                     ),
+                    p.Optional(
+                        CONF_ENABLE_LOCATION,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_LOCATION, False
+                        ),
+                    ): selector.BooleanSelector(),
+                    p.Optional(
+                        CONF_ENABLE_CHARGING_DETAILS,
+                        default=self.config_entry.options.get(
+                            CONF_ENABLE_CHARGING_DETAILS, False
+                        ),
+                    ): selector.BooleanSelector(),
+                    p.Optional(
+                        CONF_CHARGE_TIME_UNIT,
+                        default=self.config_entry.options.get(
+                            CONF_CHARGE_TIME_UNIT, "unverified"
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=["unverified", "minutes", "seconds"],
+                            translation_key="charge_time_unit",
+                        )
+                    ),
+                    p.Optional(
+                        CONF_CHARGE_DEPTH_IS_TARGET,
+                        default=self.config_entry.options.get(
+                            CONF_CHARGE_DEPTH_IS_TARGET, False
+                        ),
+                    ): selector.BooleanSelector(),
                     p.Optional(
                         CONF_ENABLE_CONTROLS,
                         default=self.config_entry.options.get(

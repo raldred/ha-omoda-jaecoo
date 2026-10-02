@@ -9,6 +9,8 @@ The EU password encoding, BFF header/signature format, token-refresh grant, TSP 
 
 No mobile-app archive, decompiled source, certificate or client private key is included. The upstream software license does not grant rights to redistribute third-party app binaries or certificate material.
 
+Read-only telemetry names and candidate unit mappings were also reviewed against the upstream `sensor.py`, `binary_sensor.py`, `device_tracker.py` and `coordinator.py`. Model-specific uncertainties are documented in README.md; SDK-only schedule/depth query availability is not represented as live verification.
+
 The captcha outline-matching approach follows the upstream solver, reimplemented with Pillow/standard Python and bounded image/work limits instead of NumPy/OpenCV. Code requests are explicit, single-attempt operations. The `phonenumbers` dependency is obtained separately from PyPI under its own Apache-2.0 license; its source/database is not vendored here.
 
 ## Manufacturer-owned app icon (not MIT-licensed)

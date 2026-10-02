@@ -506,7 +506,15 @@ def test_captcha_invalid_key_safe(key):
 
 
 def test_otp_routes_strict_and_read_allowlist_unchanged():
-    assert set(api.ALLOWED_ROUTES) == {"token", "vehicles", "tsp_login", "realtime"}
+    assert set(api.ALLOWED_ROUTES) == {
+        "token",
+        "vehicles",
+        "tsp_login",
+        "realtime",
+        "location",
+        "charge_schedule",
+        "charge_depth",
+    }
     assert otp.OTP_ROUTES == {
         "/code/create",
         "/code/check",

@@ -20,7 +20,14 @@ from homeassistant.exceptions import (
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import ApiError, AuthenticationError, JaecooApi, RateLimitError, Vehicle
+from .api import (
+    ApiError,
+    AuthenticationError,
+    CannotConnect,
+    JaecooApi,
+    RateLimitError,
+    Vehicle,
+)
 from .commands import (
     CommandCancelled,
     CommandClient,
@@ -30,17 +37,33 @@ from .commands import (
     PinVerificationError,
 )
 from .const import (
+    CHARGING_QUERY_SECONDS,
     COMMAND_COOLDOWN_SECONDS,
+    CONF_CHARGE_TIME_UNIT,
     CONF_CLIMATE_DURATION,
     CONF_CONTROL_PIN,
+    CONF_ENABLE_CHARGING_DETAILS,
     CONF_ENABLE_CONTROLS,
+    CONF_ENABLE_LOCATION,
     CONF_PIN_BLOCKED,
     CONF_POLL_INTERVAL,
     CONF_SELECTED_VINS,
     DEFAULT_CLIMATE_DURATION,
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
+    LOCATION_QUERY_SECONDS,
+    OPTIONAL_FAILURE_SECONDS,
     STALE_AFTER_SECONDS,
+)
+from .telemetry import (
+    ChargeSchedule,
+    ChargingData,
+    Position,
+    parse_charging,
+    parse_depth,
+    parse_extras,
+    parse_position,
+    parse_schedule,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,6 +102,8 @@ class VehicleSnapshot:
     cabin_temperature: float | None = None
     target_temperature: float | None = None
     doors: dict[str, bool | None] = field(default_factory=dict)
+    charging: ChargingData | None = None
+    extras: dict[str, float | bool | None] = field(default_factory=dict)
 
     def freshness(self) -> str:
         if self.degraded:
@@ -159,7 +184,11 @@ def observation_time(data: dict[str, Any], now: datetime) -> datetime | None:
 
 
 def normalize_snapshot(
-    data: dict[str, Any], now: datetime, previous: VehicleSnapshot | None = None
+    data: dict[str, Any],
+    now: datetime,
+    previous: VehicleSnapshot | None = None,
+    *,
+    remaining_unit: str = "unverified",
 ) -> VehicleSnapshot:
     """Retain last readings on empty/asleep replies, without relabelling them fresh."""
     if not data:
@@ -171,6 +200,9 @@ def normalize_snapshot(
             now,
             False,
         )
+    observed = observation_time(data, now)
+    charging = parse_charging(data, observed, now, remaining_unit)
+    extras = parse_extras(data)
     range_value = None
     for key in ("dynamicPureElectricRange", "electricRange", "pureElectricRange"):
         range_value = finite_number(data.get(key))
@@ -196,6 +228,8 @@ def normalize_snapshot(
             now,
             True,
             degraded=True,
+            charging=charging,
+            extras=extras,
         )
     unlocked = binary_state(data.get("doorLock"))
     target = finite_number(data.get("frontSetTempLeft"), minimum=10, maximum=40)
@@ -205,9 +239,11 @@ def normalize_snapshot(
         battery=round(battery, 1) if battery is not None else None,
         electric_range=range_value,
         odometer=finite_number(data.get("odometer")),
-        observed_at=observation_time(data, now),
+        observed_at=observed,
         fetched_at=now,
         has_payload=True,
+        charging=charging,
+        extras=extras,
         door_locked=None if unlocked is None else not unlocked,
         climate_on=binary_state(data.get("frontHVACState")),
         cabin_temperature=finite_number(
@@ -250,6 +286,13 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
         self.options = dict(entry.options)
         self.selected_vins = list(entry.data[CONF_SELECTED_VINS])
         self.vehicles: dict[str, Vehicle] = {}
+        self.positions: dict[str, Position | None] = {}
+        self.schedules: dict[str, ChargeSchedule | None] = {}
+        self.charge_depths: dict[str, float | None] = {}
+        self._optional_next_due: dict[tuple[str, str], float] = {}
+        self._optional_errors: dict[tuple[str, str], str] = {}
+        self._optional_blocked_until = 0.0
+        self._optional_refresh_task: asyncio.Task | None = None
         self.poll_interval = timedelta(
             minutes=entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         )
@@ -285,7 +328,12 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
             for vin in self.selected_vins:
                 raw = await self.api.async_realtime(vin)
                 result[vin] = normalize_snapshot(
-                    raw, dt_util.utcnow(), previous.get(vin)
+                    raw,
+                    dt_util.utcnow(),
+                    previous.get(vin),
+                    remaining_unit=self.options.get(
+                        CONF_CHARGE_TIME_UNIT, "unverified"
+                    ),
                 )
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed(
@@ -303,7 +351,126 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
             ) from err
         self.update_interval = self.poll_interval
         self._reconcile_lock_reports(result)
+        self._schedule_optional_reads()
         return result
+
+    def _optional_enabled(self, kind: str) -> bool:
+        key = (
+            CONF_ENABLE_LOCATION if kind == "location" else CONF_ENABLE_CHARGING_DETAILS
+        )
+        return bool(self.entry.options.get(key, False))
+
+    def _schedule_optional_reads(self) -> None:
+        if (
+            self._optional_refresh_task is not None
+            and not self._optional_refresh_task.done()
+        ):
+            return
+        now = time.monotonic()
+        if now < self._optional_blocked_until:
+            return
+        due = []
+        for vin in self.selected_vins:
+            for kind in ("location", "charge_schedule", "charge_depth"):
+                key = (vin, kind)
+                if self._optional_enabled(kind) and now >= self._optional_next_due.get(
+                    key, 0
+                ):
+                    interval = (
+                        LOCATION_QUERY_SECONDS
+                        if kind == "location"
+                        else CHARGING_QUERY_SECONDS
+                    )
+                    self._optional_next_due[key] = now + interval
+                    due.append(key)
+        if not due:
+            return
+        task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_optional_reads(due),
+            "Omoda / Jaecoo optional cached vehicle data",
+            eager_start=False,
+        )
+        self._optional_refresh_task = task
+        task.add_done_callback(self._optional_finished)
+
+    def _optional_finished(self, task: asyncio.Task | None) -> None:
+        if self._optional_refresh_task is task:
+            self._optional_refresh_task = None
+
+    async def _async_optional_reads(self, due: list[tuple[str, str]]) -> None:
+        getters = {
+            "location": self.api.async_location,
+            "charge_schedule": self.api.async_charge_schedule,
+            "charge_depth": self.api.async_charge_depth,
+        }
+        stores = {
+            "location": self.positions,
+            "charge_schedule": self.schedules,
+            "charge_depth": self.charge_depths,
+        }
+        try:
+            for vin, kind in due:
+                key = (vin, kind)
+                if not self._optional_enabled(kind):
+                    stores[kind].pop(vin, None)
+                    continue
+                try:
+                    raw = await getters[kind](vin)
+                except RateLimitError as err:
+                    delay = getattr(err, "retry_after", None)
+                    if (
+                        not isinstance(delay, (int, float))
+                        or not math.isfinite(delay)
+                        or delay < OPTIONAL_FAILURE_SECONDS
+                    ):
+                        delay = OPTIONAL_FAILURE_SECONDS
+                    self._optional_blocked_until = time.monotonic() + delay
+                    self._optional_errors[key] = "rate_limited"
+                    stores[kind][vin] = None
+                    return
+                except AuthenticationError:
+                    self._optional_errors[key] = "auth_unavailable"
+                    self._optional_blocked_until = (
+                        time.monotonic() + OPTIONAL_FAILURE_SECONDS
+                    )
+                    stores[kind][vin] = None
+                    return  # Primary telemetry owns reauth; don't loop optional calls.
+                except CannotConnect:
+                    self._optional_errors[key] = "temporarily_unavailable"
+                    interval = (
+                        LOCATION_QUERY_SECONDS
+                        if kind == "location"
+                        else CHARGING_QUERY_SECONDS
+                    )
+                    self._optional_next_due[key] = time.monotonic() + interval
+                    stores[kind][vin] = None
+                    continue
+                except ApiError:
+                    self._optional_errors[key] = "unavailable"
+                    self._optional_next_due[key] = (
+                        time.monotonic() + OPTIONAL_FAILURE_SECONDS
+                    )
+                    stores[kind][vin] = None
+                    continue
+                if not self._optional_enabled(kind):
+                    stores[kind].pop(vin, None)
+                    continue
+                if kind == "location":
+                    value = parse_position(raw, dt_util.utcnow())
+                elif kind == "charge_schedule":
+                    value = parse_schedule(raw)
+                else:
+                    value = parse_depth(raw)
+                stores[kind][vin] = value
+                if value is None:
+                    self._optional_errors[key] = "no_data"
+                else:
+                    self._optional_errors.pop(key, None)
+                self.async_update_listeners()
+        finally:
+            self._optional_finished(asyncio.current_task())
+            self.async_update_listeners()
 
     def pending_lock_target(self, vin: str) -> bool | None:
         request = self._lock_requests.get(vin)

@@ -87,14 +87,22 @@
   "options": {
     "step": {
       "init": {
-        "title": "Polling and optional remote controls",
+        "title": "Telemetry, privacy and optional controls",
         "description": "Polling only reads cloud snapshots and never wakes the car. Enabling remote controls adds native Lock and Climate entities; using their actions or automations can physically unlock or operate the vehicle. Commands are experimental, require the correct PIN and permissions, and have NOT been validated on your car. API acceptance does not prove completion: check the Command status sensor and the vehicle. No MQTT acknowledgement or automatic wake is used. Start with a supervised test while safely parked. Climate duration must match a duration reported by your vehicle.",
-        "data": {"poll_interval": "Polling interval", "enable_controls": "Enable experimental remote controls", "climate_duration": "Climate run duration"}
+        "data": {"poll_interval": "Polling interval", "enable_controls": "Enable experimental remote controls", "climate_duration": "Climate run duration", "enable_location": "Record last-reported vehicle location", "enable_charging_details": "Read experimental charging settings", "charge_time_unit": "Remaining-charge-time API unit", "charge_depth_is_target": "Charging depth is a verified target percentage"},
+        "data_description": {
+          "enable_location": "Opt-in map tracker. Reads cached location without waking the car. Coordinates may be stale and are recorded in HA history/backups; disabling this does not erase history. Do not use it alone for security or automatic unlocking.",
+          "enable_charging_details": "Additional read-only schedule/depth queries, at most every 15 minutes. Support varies by car; no charging setting is changed.",
+          "charge_time_unit": "Leave unverified until the raw remaining-time value has been compared with the app during charging. This is a decoder setting, not a charging control. ETA needs a fresh source timestamp.",
+          "charge_depth_is_target": "Enable only after comparing the raw charging-depth reading with your car's actual charge target. This only labels data as %, never changes the target. Requires charging settings reads."
+        }
       }
     },
     "error": {
       "invalid_interval": "Choose a whole number from 5 to 60 minutes.",
       "invalid_duration": "Choose a whole number from 1 to 60 minutes. The vehicle must also report this duration as supported.",
+      "invalid_time_unit": "Choose unverified, minutes or seconds.",
+      "charging_details_required": "Enable charging settings reads before interpreting charging depth as a target percentage.",
       "pin_required": "Save the vehicle control PIN using Reconfigure before enabling controls.",
       "pin_blocked": "Controls are paused after an unsuccessful/inconclusive PIN check. Verify the correct PIN in the app, then re-enter it using Reconfigure."
     }
@@ -102,7 +110,8 @@
   "selector": {
     "account_type": {"options": {"email": "Email address", "phone": "Phone number"}},
     "auth_method": {"options": {"password": "Account password", "otp": "One-time email or SMS code"}},
-    "otp_action": {"options": {"verify": "Verify code", "resend": "Send a new code"}}
+    "otp_action": {"options": {"verify": "Verify code", "resend": "Send a new code"}},
+    "charge_time_unit": {"options": {"unverified": "Not verified — keep ETA unknown", "minutes": "Minutes — confirmed against app", "seconds": "Seconds — confirmed against app"}}
   },
   "entity": {
     "sensor": {
@@ -110,6 +119,27 @@
       "electric_range": {"name": "Electric range"},
       "odometer": {"name": "Odometer"},
       "cabin_temperature": {"name": "Cabin temperature"},
+      "charging_status": {"name": "Charging status", "state": {"unplugged": "Unplugged", "plugged_in": "Plugged in", "charging": "Charging"}},
+      "charging_power": {"name": "Reported charging power"},
+      "charge_time_remaining_raw": {"name": "Remaining charge time (raw)"},
+      "charge_time_remaining": {"name": "Charge time remaining"},
+      "charging_eta": {"name": "Estimated charging finish"},
+      "charging_depth_raw": {"name": "Charging depth (raw)"},
+      "charge_target": {"name": "Charge target"},
+      "charge_schedule": {"name": "Charging schedule", "state": {"enabled": "Enabled", "disabled": "Disabled"}},
+      "speed": {"name": "Reported speed"},
+      "hv_voltage": {"name": "HV battery voltage"},
+      "hv_current": {"name": "HV battery current"},
+      "driver_seat_heat": {"name": "Driver seat heating level"},
+      "driver_seat_vent": {"name": "Driver seat ventilation level"},
+      "passenger_seat_heat": {"name": "Passenger seat heating level"},
+      "passenger_seat_vent": {"name": "Passenger seat ventilation level"},
+      "rear_left_seat_heat": {"name": "Rear left seat heating level"},
+      "rear_left_seat_vent": {"name": "Rear left seat ventilation level"},
+      "rear_right_seat_heat": {"name": "Rear right seat heating level"},
+      "rear_right_seat_vent": {"name": "Rear right seat ventilation level"},
+      "rear_centre_seat_heat": {"name": "Rear centre seat heating level"},
+      "rear_centre_seat_vent": {"name": "Rear centre seat ventilation level"},
       "command_status": {
         "name": "Command status",
         "state": {"not_requested": "No command requested", "submitting": "Submitting request", "accepted_unconfirmed": "Accepted — completion unconfirmed", "rejected": "Not sent or rejected", "unknown_outcome": "Outcome unknown — check vehicle", "pin_blocked": "Controls paused — check PIN", "not_sent": "Cancelled before submission", "state_observed": "Requested lock state reported", "confirmation_timeout": "Lock state not confirmed — check vehicle"}
@@ -128,9 +158,19 @@
       "door_front_right": {"name": "Front right door"},
       "door_rear_left": {"name": "Rear left door"},
       "door_rear_right": {"name": "Rear right door"},
-      "boot": {"name": "Boot"}
+      "boot": {"name": "Boot"},
+      "window_front_left": {"name": "Front left window"},
+      "window_front_right": {"name": "Front right window"},
+      "window_rear_left": {"name": "Rear left window"},
+      "window_rear_right": {"name": "Rear right window"},
+      "sunroof_open": {"name": "Sunroof"},
+      "windscreen_defrost": {"name": "Windscreen defrost"},
+      "heated_windscreen": {"name": "Heated windscreen"},
+      "rear_defrost": {"name": "Rear-window heating"},
+      "steering_wheel_heat": {"name": "Steering-wheel heating"}
     },
     "lock": {"lock": {"name": "Doors"}},
-    "climate": {"climate": {"name": "Climate"}}
+    "climate": {"climate": {"name": "Climate"}},
+    "device_tracker": {"location": {"name": "Last reported location"}}
   }
 }

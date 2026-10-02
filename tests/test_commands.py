@@ -407,7 +407,15 @@ def test_command_route_allowlist_and_no_constructor_requests():
     assert {
         key for key in commands.COMMAND_ROUTES if key in ("wake", "locate", "mqtt")
     } == set()
-    assert set(api.ALLOWED_ROUTES) == {"token", "vehicles", "tsp_login", "realtime"}
+    assert set(api.ALLOWED_ROUTES) == {
+        "token",
+        "vehicles",
+        "tsp_login",
+        "realtime",
+        "location",
+        "charge_schedule",
+        "charge_depth",
+    }
     for country in ("0", "44\r\nsecret", None):
         with pytest.raises(commands.CommandError):
             commands.CommandClient(obj._api, session, country)
