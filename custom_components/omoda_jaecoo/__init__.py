@@ -7,11 +7,13 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 
 from .api import ApiError, JaecooApi, TokenSet
 from .commands import CommandClient
 from .const import CONF_COUNTRY_CODE, CONF_TOKENS
 from .coordinator import OmodaJaecooCoordinator
+from .services import async_register_actions
 
 PLATFORMS = [
     Platform.SENSOR,
@@ -20,6 +22,12 @@ PLATFORMS = [
     Platform.CLIMATE,
     Platform.DEVICE_TRACKER,
 ]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register native actions independently of loaded account entries."""
+    async_register_actions(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

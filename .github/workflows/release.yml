@@ -1,0 +1,82 @@
+name: Prepare draft preview release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Committed manifest version to package (without a v prefix)
+        required: true
+        default: "0.6.0"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draft-preview-release
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
+
+  draft:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SHA: ${{ github.sha }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out the exact tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build committed-tree component artifacts
+        run: |
+          set -euo pipefail
+          python scripts/build_release.py --ref "$RELEASE_SHA" --expected-version "$RELEASE_VERSION"
+          test -f "docs/releases/$RELEASE_VERSION.md"
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Retain the tested release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omoda-jaecoo-preview-${{ inputs.version }}
+          path: |
+            dist/omoda_jaecoo.zip
+            dist/SHA256SUMS
+            dist/release.json
+          if-no-files-found: error
+      - name: Refuse any existing release or tag, then create only a draft pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v$RELEASE_VERSION"
+          # Read-only API checks fail closed if authentication or pagination fails.
+          gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name' > "$RUNNER_TEMP/release-tags"
+          if grep -Fxq -- "$TAG" "$RUNNER_TEMP/release-tags"; then
+            echo "A release already exists for this version; refusing to overwrite it." >&2
+            exit 1
+          fi
+          gh api --paginate "repos/$GH_REPO/git/matching-refs/tags/" --jq '.[].ref' > "$RUNNER_TEMP/git-tags"
+          if grep -Fxq -- "refs/tags/$TAG" "$RUNNER_TEMP/git-tags"; then
+            echo "A tag already exists for this version; refusing to overwrite it." >&2
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --repo "$GH_REPO" \
+            --target "$RELEASE_SHA" \
+            --draft --prerelease \
+            --title "Omoda / Jaecoo $RELEASE_VERSION preview" \
+            --notes-file "docs/releases/$RELEASE_VERSION.md" \
+            dist/omoda_jaecoo.zip dist/SHA256SUMS dist/release.json

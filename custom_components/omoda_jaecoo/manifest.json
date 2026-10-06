@@ -8,5 +8,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/raldred/ha-omoda-jaecoo/issues",
   "requirements": ["phonenumbers==9.0.40"],
-  "version": "0.5.1"
+  "version": "0.6.0"
 }

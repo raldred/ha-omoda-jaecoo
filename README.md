@@ -12,6 +12,10 @@ Requires **Home Assistant 2026.7.1 or newer** for the current native config-flow
 
 ### Install manually (private repository)
 
+If using a prepared release, download `omoda_jaecoo.zip` from the private release, verify its checksum against `SHA256SUMS`, and extract it into `/config/custom_components/`. The ZIP contains the `omoda_jaecoo/` directory—do not nest that directory twice. Back up any previous installation first. Draft previews remain unpublished until explicitly released.
+
+Alternatively:
+
 1. Clone/download this repository using your GitHub account with access.
 2. Copy **only** `custom_components/omoda_jaecoo/` into HA's configuration directory, resulting in `/config/custom_components/omoda_jaecoo/manifest.json`. Keep the folder name exactly `omoda_jaecoo`.
 3. Restart Home Assistant at a suitable time. Installation/restart is a deliberate user action, not something the probe performs.
@@ -96,6 +100,20 @@ The tracker validates coordinate ranges, rejects placeholder 0,0 and does not gu
 ### Door/climate state and automation triggers
 
 Read-only binary sensors expose the reported lock state, climate running state, each of the four doors and the boot. They use ordinary HA state triggers in automations; no custom event or helper is needed. For the lock-status binary sensor, **on means unlocked**, following HA's LOCK device class. Missing/invalid fields remain unknown rather than off/closed. A cached cloud state is not proof of the car's current physical state.
+
+### Native refresh action (no wake)
+
+Use **Developer tools → Actions → Omoda / Jaecoo: Refresh cloud status**, select the account from the dropdown and run it. The UI fills in the required config-entry ID; no VIN, password or PIN is passed in service data.
+
+```yaml
+action: omoda_jaecoo.refresh_status
+data:
+  config_entry_id: YOUR_CONFIG_ENTRY_ID
+```
+
+This refreshes the selected vehicles **on that account**, updates their entities, and uses the existing optional-read privacy settings/throttles. It is a cloud read, **not a physical ping or wake**, and may still return a cached vehicle report. Check Vehicle report time and Telemetry freshness rather than treating a completed request as proof that the car is awake. It never sends a PIN check, OTP, horn, locate or other physical control command.
+
+An explicit account target is required; there is no implicit “all accounts.” The action requires an administrator for direct calls; trusted HA automations may call it without a user context. Simultaneous manual requests for one account are rejected, with a 10-second cooldown between them. Normal polling and post-command status checks are unchanged. The action stays registered after an account unloads and gives a useful error instead of silently doing nothing. Cloud failures raise an action error; data lives in normal HA entities, not a service-response payload.
 
 ### Experimental remote controls (explicit opt-in)
 
@@ -229,6 +247,19 @@ Tests use synthetic credentials and fake responses; real sockets are blocked. No
 The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, a pure telemetry parser, native sensor/binary-sensor/control/tracker platforms and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography/Pillow dependencies. HA installs the declared `phonenumbers` requirement for country-aware phone formatting. No NumPy or browser automation is needed for OTP delivery. The standalone probe remains separate to avoid a dependency on HA.
 
 Before treating controls as production-ready, perform supervised model-specific PIN/permission, lock/unlock, climate and session tests. Terminal command acknowledgement remains unimplemented without the vendor MQTT channel. Never turn passive sensor refresh into an implicit climate/wake command.
+
+## Preparing a release
+
+The integration version in `custom_components/omoda_jaecoo/manifest.json` is the release version (independent of the standalone probe's Python project version). Build only after committing the intended source:
+
+```sh
+python3 scripts/build_release.py --ref HEAD --expected-version 0.6.0
+(cd dist && shasum -a 256 -c SHA256SUMS)
+```
+
+The standard-library builder creates a deterministic ZIP from the **committed Git tree**, plus checksums and `release.json` recording the exact commit/version. Local untracked files and dirty working-tree edits are not packaged. Existing artifacts are protected unless `--force` is supplied. Unsafe paths, symlinks, unexpected files and private-key material fail the build.
+
+The **Prepare draft preview release** GitHub workflow is manually dispatched. It runs the offline suites for that commit, builds the artifacts, refuses existing tags/releases and creates only a **draft pre-release**—never an automatic public/stable release. Review the release notes and artifacts before any publication. The repository remains private; public release also needs a vendor-artwork rights review. HACS continues normal repository/source installation rather than ZIP-release mode.
 
 ## Repository boundaries
 

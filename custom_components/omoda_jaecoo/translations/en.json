@@ -105,6 +105,23 @@
       "pin_blocked": "Controls are paused after an unsuccessful/inconclusive PIN check. Verify the correct PIN in the app, then re-enter it using Reconfigure."
     }
   },
+  "services": {
+    "refresh_status": {
+      "name": "Refresh cloud status",
+      "description": "Read the latest cloud telemetry for the selected vehicles on this account. This is NOT a vehicle ping/wake: it cannot prove the car is awake and may still return cached data. No PIN, charging/control command or OTP request is sent. Uses existing opt-in settings and optional-query throttles. Requires an explicit account and administrator access (trusted automations are allowed).",
+      "fields": {
+        "config_entry_id": {"name": "Account", "description": "Choose the configured Omoda / Jaecoo account to refresh."}
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_refresh_target": {"message": "Select a configured Omoda / Jaecoo account."},
+    "refresh_target_unloaded": {"message": "The selected account is not loaded. Reload or reauthenticate the integration first."},
+    "refresh_in_progress": {"message": "A manual cloud refresh is already in progress for this account."},
+    "refresh_cooldown": {"message": "Wait at least 10 seconds between manual refresh requests."},
+    "refresh_target_changed": {"message": "The account was reloaded or unloaded during the request. Try again once it is loaded."},
+    "refresh_failed": {"message": "Cloud status could not be refreshed. Check the integration status; no vehicle command was sent."}
+  },
   "selector": {
     "account_type": {"options": {"email": "Email address", "phone": "Phone number"}},
     "auth_method": {"options": {"password": "Account password", "otp": "One-time email or SMS code"}},

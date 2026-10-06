@@ -1,0 +1,7 @@
+{
+  "services": {
+    "refresh_status": {
+      "service": "mdi:cloud-refresh"
+    }
+  }
+}

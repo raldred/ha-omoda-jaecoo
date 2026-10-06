@@ -1,0 +1,7 @@
+refresh_status:
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: omoda_jaecoo
