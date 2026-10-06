@@ -94,6 +94,16 @@ def test_archive_is_component_only_deterministic_and_checksummed(repo, tmp_path)
         assert not any("private" in name or "analysis" in name for name in names)
 
 
+def test_brand_rights_notice_is_preserved(repo, tmp_path):
+    notice = repo / "custom_components/omoda_jaecoo/brand/NOTICE.md"
+    notice.write_text("Manufacturer artwork is excluded from MIT.\n")
+    commit(repo)
+    output = tmp_path / "with-notice"
+    build_release(repo, output)
+    with zipfile.ZipFile(output / "omoda_jaecoo.zip") as archive:
+        assert archive.read("omoda_jaecoo/brand/NOTICE.md") == notice.read_bytes()
+
+
 def test_only_committed_ref_is_packaged(repo, tmp_path):
     old = run_git(repo, "rev-parse", "HEAD")
     manifest = repo / "custom_components/omoda_jaecoo/manifest.json"

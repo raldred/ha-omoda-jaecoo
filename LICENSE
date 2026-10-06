@@ -1,8 +1,4 @@
-MIT License (software only)
-
-The manufacturer-owned artwork in custom_components/omoda_jaecoo/brand/ is
-excluded from this license. No trademark or artwork redistribution rights are
-granted; see THIRD_PARTY_NOTICES.md.
+MIT License
 
 Copyright (c) 2026 raldred
 Copyright (c) 2026 Caslinovich (referenced protocol implementation; see THIRD_PARTY_NOTICES.md)

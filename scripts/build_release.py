@@ -110,7 +110,8 @@ def collect_files(repo: Path, commit: str) -> dict[str, bytes]:
         relative = "README.md" if path == "README.md" else path[len(COMPONENT) :]
         safe = validate_path(relative)
         allowed = (
-            relative in {"LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"}
+            relative
+            in {"LICENSE", "THIRD_PARTY_NOTICES.md", "README.md", "brand/NOTICE.md"}
             or safe.suffix in {".py", ".json", ".yaml"}
             or (safe.parent == PurePosixPath("brand") and safe.suffix == ".png")
         )

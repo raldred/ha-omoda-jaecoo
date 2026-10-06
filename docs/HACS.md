@@ -16,10 +16,16 @@ Configured here:
 
 The existing `v0.6.0` draft was prepared before the HACS metadata/validation changes. It is not a published release and must not be used to claim completion of the catalogue prerequisites. Rebuild the intended release from the final validated commit before publication; do not overwrite a published version.
 
+## Validation evidence
+
+- Hassfest passed on the initial preparation: https://github.com/raldred/ha-omoda-jaecoo/actions/runs/37534396155/job/112511551541
+- That HACS run correctly did **not** pass: the modified MIT header prevented SPDX identification, and its public raw-file downloads returned no manifest/HACS JSON for the private repository. Canonical MIT text plus a separate manufacturer-artwork notice resolves the licence-identification issue without relicensing the artwork. Public-file accessibility remains a visibility prerequisite, not a check to ignore.
+- Re-run both checks on the final public candidate and replace these preparation links with the successful final runs before submitting to the catalogue.
+
 ## Decisions required before public distribution
 
 1. Obtain the owner's explicit approval to make the repository public. This preparation does not change visibility.
-2. Review the manufacturer-owned icon rights, or replace it with artwork cleared for redistribution. The app icon is excluded from the MIT software license; private inclusion is not proof of permission to publish it.
+2. Review the manufacturer-owned icon rights, or replace it with artwork cleared for redistribution. The app icon is excluded from the MIT software license; private inclusion is not proof of permission to publish it. Review Git history too: removing an image only from the latest commit does not remove it from earlier commits.
 3. Review release-readiness and limitations. Email/password and core telemetry have live validation; alternate auth routes and model-specific/optional functionality do not have equivalent coverage. Experimental controls remain opt-in.
 4. Run HACS and Hassfest successfully on the final intended source **with no ignored checks**. Record links to the actual runs, not merely the workflow files.
 5. Publish a full GitHub release after those checks pass. A draft or a standalone tag is not sufficient for default-catalogue submission.

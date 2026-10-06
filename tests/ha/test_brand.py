@@ -44,7 +44,11 @@ def test_brand_png_dimensions_and_metadata(filename, size):
 
 def test_only_native_icon_assets_are_shipped():
     """Square app artwork doubles as the logo through HA's native fallback."""
-    assert {path.name for path in BRAND_DIR.iterdir()} == {"icon.png", "icon@2x.png"}
+    assert {path.name for path in BRAND_DIR.iterdir()} == {
+        "icon.png",
+        "icon@2x.png",
+        "NOTICE.md",
+    }
     for filename in ALLOWED_IMAGES:
         result = _read_brand_file(BRAND_DIR, filename)
         assert result is not None, filename
