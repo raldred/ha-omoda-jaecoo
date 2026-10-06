@@ -25,7 +25,7 @@ Alternatively:
 7. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
 8. Optionally enter the **separate vehicle control PIN**, or leave it blank. The PIN is **not verified during setup**. It is used only for explicit commands after you enable controls. No PIN request or physical command is sent simply by setting up or enabling the integration.
 
-HACS metadata is included for future distribution, but this repo is currently private; do not assume ordinary public HACS installation will work. Manual installation is the documented path. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
+HACS metadata and HACS/Hassfest validation workflows are configured, but this repo is currently private and is **not listed in the HACS default catalogue**. Manual installation is the current path. After public publication, users can add it as a HACS **custom repository** without waiting for catalogue inclusion. See [HACS distribution and submission](https://github.com/raldred/ha-omoda-jaecoo/blob/main/docs/HACS.md) for installation steps and the remaining public-release gates. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
 
 ### Four sign-in combinations
 
