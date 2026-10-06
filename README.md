@@ -1,109 +1,118 @@
-# ha-omoda-jaecoo
+# Omoda / Jaecoo for Home Assistant
 
-An **unofficial, early-stage** project exploring Home Assistant support for Omoda and Jaecoo vehicles using the European **OMODA JAECOO** app.
+An **unofficial Home Assistant custom integration** for vehicles using the European **OMODA JAECOO** app. It provides native account setup, cloud telemetry, optional location tracking and opt-in vehicle controls.
 
-**Current state: a native Home Assistant custom integration with passive telemetry, experimental opt-in lock/climate controls, and a read-only diagnostic script.** Tested offline against HA **2026.7.1 and 2026.9.4**. Account-password login and native battery/range/odometer sensors have been validated on one user's vehicle. **Physical commands have not yet been tested on that vehicle.** This is not an official HA core integration or a guarantee of compatibility with every model.
+**Preview release — UK-tested, EU backend only.** Not CarLinko, not a universal Chery integration, and not affiliated with the manufacturer or Home Assistant. Model-specific capabilities vary. Lock/climate requests have been reported working by the reference user, but broad compatibility and terminal command acknowledgements are not established.
 
-It supports accounts on the EU OMODA JAECOO backend, not CarLinko or automatic regional routing. Controls are **disabled by default**. The local integration icon uses the manufacturer-owned Android app artwork; see the licensing note below.
+Requires **Home Assistant 2026.7.1+**. Offline integration tests run against 2026.7.1 and 2026.9.4.
 
-## Home Assistant installation and setup
+## Installation
 
-Requires **Home Assistant 2026.7.1 or newer** for the current native config-flow implementation. No vehicle commands are issued during setup, startup, polling or reauthentication.
+### HACS custom repository
 
-### Install manually (private repository)
+This project is **not yet in the HACS default catalogue**. Add it as a custom repository:
 
-If using a prepared release, download `omoda_jaecoo.zip` from the private release, verify its checksum against `SHA256SUMS`, and extract it into `/config/custom_components/`. The ZIP contains the `omoda_jaecoo/` directory—do not nest that directory twice. Back up any previous installation first. Draft previews remain unpublished until explicitly released.
+1. Open **HACS → ⋮ → Custom repositories**.
+2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
+3. Download **Omoda / Jaecoo**. Preview releases may require enabling beta versions in HACS.
+4. Restart Home Assistant Core.
+5. Open **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
 
-Alternatively:
+[Open this repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=raldred&repository=ha-omoda-jaecoo&category=integration)
 
-1. Clone/download this repository using your GitHub account with access.
-2. Copy **only** `custom_components/omoda_jaecoo/` into HA's configuration directory, resulting in `/config/custom_components/omoda_jaecoo/manifest.json`. Keep the folder name exactly `omoda_jaecoo`.
-3. Restart Home Assistant at a suitable time. Installation/restart is a deliberate user action, not something the probe performs.
-4. Go to **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
-5. Choose **Email address or Phone number**, then **Account password or One-time code**. All four combinations have native setup paths.
-6. Enter the registered identifier and country dialling code. For password sign-in, enter the masked account password. For OTP, explicitly confirm **Send a sign-in code**, then enter the masked email/SMS code. No message is sent just by opening a form.
-7. If multiple vehicles are discovered, select the ones to add. A single vehicle is selected automatically.
-8. Optionally enter the **separate vehicle control PIN**, or leave it blank. The PIN is **not verified during setup**. It is used only for explicit commands after you enable controls. No PIN request or physical command is sent simply by setting up or enabling the integration.
+Do not install alongside another custom integration using the same `omoda_jaecoo` domain/folder. Review and remove any conflict first.
 
-HACS metadata and HACS/Hassfest validation workflows are configured, but this repo is currently private and is **not listed in the HACS default catalogue**. Manual installation is the current path. After public publication, users can add it as a HACS **custom repository** without waiting for catalogue inclusion. See [HACS distribution and submission](https://github.com/raldred/ha-omoda-jaecoo/blob/main/docs/HACS.md) for installation steps and the remaining public-release gates. Do not overwrite an existing unrelated integration using the same `omoda_jaecoo` domain—review/remove any conflict first.
+### Manual installation
 
-### Four sign-in combinations
+Download `omoda_jaecoo.zip` from a [release](https://github.com/raldred/ha-omoda-jaecoo/releases), verify it against `SHA256SUMS`, and extract it into `/config/custom_components/`. The result must be `/config/custom_components/omoda_jaecoo/manifest.json`—do not nest the folder twice. Back up the existing integration before replacing it, then restart HA Core.
 
-| Identifier | Authentication | Delivery |
-|---|---|---|
-| Email | Password | No code requested |
-| Phone | Password | No code requested |
-| Email | One-time code | Email, explicitly requested |
-| Phone | One-time code | SMS, explicitly requested |
+Alternatively, copy only `custom_components/omoda_jaecoo/` from this repository. No YAML configuration is required.
 
-Use the identifier **already registered in the official app**, not a new account address/number. Phone inputs accept national formatting and +/00 international formatting; the selected country must match. A phone-number library removes national trunk prefixes correctly and preserves significant zeros (for example Italy). This validates the format, not ownership/assignment; the server still authenticates the account.
+## Account setup
 
-OTP delivery uses the app gateway's captcha create/check flow, then a single email/SMS request. Challenge images are processed off the HA event loop with strict size/work limits; no screenshots, codes or challenge secrets are persisted. Failed/ambiguous challenges do not trigger automatic retry loops. In particular, some SMS endpoints may refuse automated TLS clients: the flow reports this rather than weakening TLS or cycling clients to get around a refusal. Phone/password is an alternative that does not request SMS.
+Choose two things independently:
 
-You must explicitly request or resend a code. Resends wait at least **60 seconds** and honor a longer server `Retry-After`; authentication/discovery rate limits are also respected. After **three rejected code attempts**, request a fresh code instead of guessing. If a send response is ambiguous, the code-entry step remains available in case the message arrives. A discovery failure after authentication offers a read-only retry using the minted session—not another login or code submission.
+| Account identifier | Sign-in method |
+|---|---|
+| Email | Password or one-time email code |
+| Phone | Password or one-time SMS code |
 
-Your identifier and chosen method are saved for fixed-account reauthentication. **Passwords, OTPs and captcha material are not saved.** Normal startup/polling uses access/refresh tokens and never sends an OTP automatically. Old email/password entries retain their original IDs and continue working without migration or re-entry.
+Use the identifier **already registered in the official app**. Phone inputs accept national formatting and +/00 international formatting; the selected country code must match. Significant zeros are preserved where appropriate.
 
-Email/password login has been validated live on the reference vehicle. **The three new routes and captcha handling are protocol-backed and offline-tested, not yet live-verified on that account.** No real codes were sent during development. Only one setup should own a vehicle; logging in through another identifier for the same backend account may invalidate an existing app/HA session, and duplicate VINs are blocked before creating another entry.
+For OTP sign-in, explicitly request a code, then enter it in the masked field. Nothing is sent just by opening a form. Resends wait at least 60 seconds and respect the server's `Retry-After`; three rejected code attempts require a new code. Discovery failures can be retried using the authenticated session without another login or code request.
 
-### Native entities
+Select the vehicle(s) to add, then optionally save the **separate vehicle-control PIN**. This is not the account password or OTP. The PIN is not checked during setup; remote controls remain disabled until explicitly enabled.
 
-Each selected vehicle gets a device with:
+### Sessions and credentials
 
-| Sensor | Native data | Default display |
-|---|---|---|
-| Battery | `dumpEnergy`, percent, normalized to one decimal place | %, one decimal |
-| Electric range | `dynamicPureElectricRange` (fallback `electricRange`/`pureElectricRange`), km | Miles |
-| Odometer | `odometer`, km | Miles |
-| Cabin temperature | `inCarTemperature` | HA temperature unit preference |
-| Charging status | Cable and charge-state codes | Unplugged / Plugged in / Charging, or unknown |
-| Reported speed | `vehicleSpeed`, km/h | mph |
-| Vehicle report time | Explicit-zone/epoch source timestamp, if understood | Timestamp or unknown |
-| Cloud last checked | Time HA fetched the cloud snapshot | Timestamp |
-| Telemetry freshness | Source timestamp age / snapshot status | Current, stale, unknown, no snapshot or unreliable |
+- Passwords and OTPs are used transiently and **not saved**. Access/refresh tokens are saved and rotated automatically.
+- Normal polling and HA restarts do not perform password login or send OTPs. Native reauthentication uses the saved account and method if the session can no longer be refreshed.
+- Email/password has been live-validated on the reference account. The other three routes are protocol-backed and offline-tested, not equivalent live-compatibility claims. SMS delivery may be refused by the backend's client filtering; the integration does not weaken TLS or cycle clients to bypass a refusal.
+- Signing in through HA, another identifier, or the official app may invalidate another session. A separate delegated account may help, subject to its actual permissions. Duplicate VINs across integration entries are blocked.
+- Tokens, the optional PIN, identifiers and vehicle metadata live in HA configuration/backups, which are **not automatically encrypted**. Protect them. Use **Reconfigure** to replace or remove a saved PIN.
+- Diagnostics are allowlisted: no credentials, VINs, GPS values or raw responses. HTTP debug/proxy traces can nevertheless contain credentials; do not publish them.
 
-**Miles are the initial default, even on a metric HA installation.** Choose kilometres in an entity's standard settings if preferred. HA handles conversion; the integration always stores distance measurements in kilometres and does not override your later preference.
+## Vehicle entities
 
-`rangeUnit` is not used to reinterpret the raw kilometre fields: the probe confirmed 262 km → 163 mi on the reference vehicle. Other models/field fallbacks need validation. Negative, nonfinite and out-of-range battery values become unknown, not zero. Genuine zero is retained unless accompanied by the known invalid HV-frame pattern (zero voltage and -1000 current with zero battery/range). Those degraded snapshots keep previous readings, if any, and are labelled unreliable. This first version does not yet identify every possible vendor sleep sentinel.
+### Enabled by default
 
-Cloud reads default to **every 5 minutes**, configurable from 5–60 minutes under the integration's options. HTTP rate limiting backs polling off up to an hour. This is a conservative implementation choice, not a published vendor allowance. No wake/locate command, MQTT connection or automatic climate activation is involved. Empty/asleep replies retain previous measurements in memory but show **No snapshot returned**. Network failures make entities unavailable. A successful cloud read can still contain an old snapshot.
+| Entity | Behaviour |
+|---|---|
+| Battery | Percentage normalized to one decimal place |
+| Electric range | Native km, miles suggested for display |
+| Odometer | Native km, miles suggested for display |
+| Reported speed | Native km/h, mph suggested for display |
+| Cabin temperature | Uses HA temperature-unit preferences |
+| Charging status | Unplugged / Plugged in / Charging, otherwise unknown |
+| Charge time remaining | Minutes, when reported while charging |
+| Estimated charging finish | Derived from fresh observation time + remaining minutes |
+| Vehicle report time / Cloud last checked / Telemetry freshness | Keep source age separate from fetch time |
+| Door lock, climate running, four doors and boot | Read-only reported states |
 
-A report time without a timezone is **not guessed**. Unrecognized/missing source timestamps produce **Observation time unknown**. Source timestamps older than 15 minutes are labelled stale. This label is based on the timestamp returned by the service, not independent verification of individual sensors. **Cloud last checked is never presented as the vehicle's observation time.**
+HA handles distance/speed conversions and preserves your later entity-unit preferences. API display flags do not change the native kilometre fields.
 
-### More read-only entities
+### Additional entities, disabled by default
 
-The update also registers **disabled-by-default** sensors for HV battery voltage/current, direct reported charging power, and driver/passenger/rear seat heating and ventilation levels. Extra binary sensors cover the four windows, sunroof, windscreen defrost, heated windscreen, rear-window heating and steering-wheel heating.
+Enable relevant entities from the vehicle's entity list:
 
-Enable the ones relevant to your car from its **Entities** list. Their presence in a generic SDK payload does **not** establish that the hardware is fitted. Seat levels remain numeric values as reported, not invented Low/Medium/High labels. Only known 0/1 window/comfort states are decoded; unexpected states remain unknown. Speed uses native km/h with mph suggested initially, and respects HA unit overrides. HV `0 V` and `-1000 A` placeholders are rejected; current sign is preserved and never used to infer that the car is plugged in or charging.
+- Four windows and sunroof.
+- Windscreen defrost, heated windscreen, rear-window heating and steering-wheel heating.
+- Driver/passenger/rear seat heating and ventilation levels.
+- HV battery voltage/current and direct reported charging power.
+- Raw charging diagnostics for troubleshooting.
 
-Tyre readings have **not** been added based on the pressure-unit flag alone—we need the actual values and scale for this vehicle. These added entities do not send seat/window/charging commands.
+A field in a shared SDK payload does **not** establish that the hardware is fitted. Seat levels remain numeric codes, not invented Low/Medium/High labels. Unsupported codes and missing values stay unknown. Actual tyre pressure/temperature readings have not yet been validated for the reference vehicle; the pressure-unit flag alone is not used to invent them.
 
-### Charging status, schedule, target and ETA
+## Charging data
 
-The primary **Charging status** entity follows the supplied official EU app's state helpers: the cable is connected when `chargeGunState == 1` **or** `fastChargingGunStatus == 1`; `chargeState == 1` means charging and `chargeState == 2` means completed. Completed with a cable attached displays **Plugged in**, preserving the requested three-state model. Idle/unplugged, plugged-in waiting and actively charging have also been observed in the reference vehicle's HA data. Unknown or contradictory codes stay unknown rather than being treated as false. Numeric raw codes remain available as diagnostic attributes.
+The supplied official EU app confirms cable connection when `chargeGunState == 1` or `fastChargingGunStatus == 1`, charging when `chargeState == 1`, and completed when `chargeState == 2`. Completed-but-connected appears as **Plugged in**. Unknown/contradictory codes are not treated as false. Raw numeric codes are available as attributes.
 
-- **Reported charging power:** uses `chargingPower` directly as kW (community mapping), only when charging is reported. It is disabled by default and still needs comparison with the app on this vehicle. Missing is not zero; no `voltage × current` estimate or claim of mains/grid input power is made.
-- **Remaining time / ETA:** `remainChargeTime` is **minutes**, verified by tracing the supplied official EU Android app from its JSON field into `RemainingChargingTimeWidget`: it displays integer division by 60 as hours and the remainder as minutes. For example, raw `165` is **2 h 45 min**, not 165 seconds. Duration and estimated-finish entities are created automatically; there is no API-unit calibration setting. Old calibration options are removed on setup without changing credentials or other settings. ETA requires a known, nonfuture observation time no older than 15 minutes and is anchored to that sample, **not now plus a stale duration**. It assumes charging continues at the reported estimate; smart-charger pauses can extend the actual finish. Missing time, stopped charging or an ambiguous timestamp yields unknown, not zero. The raw diagnostic remains available for troubleshooting. Standard HA entity display-unit preferences are unaffected.
-- **Schedule:** enable **Read experimental charging settings** to query the app SDK's schedule endpoint. The sensor reports the main switch and all returned plans (start time, duration and raw repeat-day codes). Start/duration use the upstream minute-based interpretation. Times are shown as reported local times; no timezone, weekday mapping or next-start timestamp is invented. Missing data is not an empty/disabled schedule. This is the **vehicle's own schedule**, not a charger/Ohme or Octopus smart-charging plan. These queries have not been live-validated on the reference vehicle.
-- **Target %:** the SDK's charging-depth query is a candidate, not proven target SoC. Its raw diagnostic is disabled by default. **Only after comparing it with the car's actual target**, enable **Charging depth is a verified target percentage** to create a % sensor; values outside 0–100 remain unknown. This is a local decoder option, **not a charge-limit setter**. No default target is fabricated.
+**Remaining time is minutes**, verified by tracing the official app's formatter: it divides the unchanged field by 60 for hours and uses the remainder for minutes. Raw `165` means **2 h 45 min**. There is no user API-unit calibration setting; old calibration options are removed automatically.
 
-Experimental schedule/depth reads run at most every 15 minutes. They are independent, background reads so they cannot delay lock feedback or break battery/range updates when unsupported. Explicit optional-endpoint failures are retried no sooner than an hour; empty/asleep data and transient connection failures use the normal optional cadence. Rate limits pause the optional batch. Nothing changes the car's charge target, schedule or start/stop state.
+ETA requires an explicit, nonfuture source timestamp no older than 15 minutes. It is anchored to that sample—not now plus a stale duration—and assumes charging continues at the reported estimate. Smart-charger pauses can extend the actual finish. Missing time, stopped charging or an ambiguous timestamp yields unknown, not zero.
 
-### Optional vehicle location
+Reported charging power uses the direct `chargingPower` field in kW according to the community mapping, when charging is reported. It still needs model-specific comparison with the app. No `voltage × current` estimate or claim of mains/grid input power is made.
 
-Enable **Record last-reported vehicle location** in options to create a native map tracker. It calls **queryVehicleLocation**, not the separate locate/wake command. The API is asked for existing location data at most every five minutes when normal polling runs; lock/climate fast checks do not repeatedly query GPS. Optional reads are asynchronous and cannot hold up the main telemetry refresh.
+### Experimental schedule and target reads
 
-The tracker validates coordinate ranges, rejects placeholder 0,0 and does not guess scaled coordinates or restore an old point after a failed read. It is labelled **Last reported location**, not live GPS. Only explicit GPS/position timestamps are treated as fix times; general vehicle timestamps are not substituted. Location may be stale or have unknown age—do not use it alone for automatic unlocking/security decisions.
+Enable **Read experimental charging settings** to request the vehicle SDK's schedule/depth data, at most every 15 minutes:
 
-**Privacy:** off by default, with no location query, tracker, or coordinate storage in coordinator state while disabled. Enabling it records coordinates in HA state/history/backups. Turning it off stops new tracking but does not erase history. Diagnostics never include GPS coordinates, account details or raw responses.
+- Schedule reports include the main switch and returned plans. Start/duration follow the upstream minute-based interpretation; repeat-day codes remain raw. No timezone, weekday mapping or next-start timestamp is invented. Missing is not disabled. This is the **vehicle's schedule**, not an Ohme/charger or Octopus smart-charging plan.
+- The charging-depth query is a candidate for a charge target, not verified target SoC. Its raw diagnostic is disabled by default. Only after comparing it with the car's actual target should **Charging depth is a verified target percentage** be enabled. This merely labels data as %, never changes a limit. No default target is fabricated.
 
-### Door/climate state and automation triggers
+These optional queries are not yet live-validated on the reference vehicle. Failures cannot block the main telemetry refresh; explicit endpoint failures back off for an hour. No charge start/stop, schedule or limit writes are implemented.
 
-Read-only binary sensors expose the reported lock state, climate running state, each of the four doors and the boot. They use ordinary HA state triggers in automations; no custom event or helper is needed. For the lock-status binary sensor, **on means unlocked**, following HA's LOCK device class. Missing/invalid fields remain unknown rather than off/closed. A cached cloud state is not proof of the car's current physical state.
+## Optional location
 
-### Native refresh action (no wake)
+Enable **Record last-reported vehicle location** to add a native map tracker. It requests existing data through `queryVehicleLocation`, **not** the separate locate/wake command. Queries are limited to the normal cadence, at most once per five minutes; fast control-feedback reads do not repeatedly query GPS.
 
-Use **Developer tools → Actions → Omoda / Jaecoo: Refresh cloud status**, select the account from the dropdown and run it. The UI fills in the required config-entry ID; no VIN, password or PIN is passed in service data.
+The tracker rejects invalid coordinates and placeholder 0,0, does not guess coordinate scaling, and does not restore a point after a failed query. Only explicit GPS/position timestamps count as fix times. This is **last-reported**, not guaranteed live GPS—do not use it alone for security or automatic unlocking.
+
+**Privacy:** off by default. When enabled, coordinates enter HA state/history/backups. Disabling stops new tracking but does not erase existing history. Coordinates are not included in integration diagnostics.
+
+## Native refresh action — no wake
+
+Open **Developer tools → Actions → Omoda / Jaecoo: Refresh cloud status** and select the account. The UI fills the required config-entry ID:
 
 ```yaml
 action: omoda_jaecoo.refresh_status
@@ -111,160 +120,58 @@ data:
   config_entry_id: YOUR_CONFIG_ENTRY_ID
 ```
 
-This refreshes the selected vehicles **on that account**, updates their entities, and uses the existing optional-read privacy settings/throttles. It is a cloud read, **not a physical ping or wake**, and may still return a cached vehicle report. Check Vehicle report time and Telemetry freshness rather than treating a completed request as proof that the car is awake. It never sends a PIN check, OTP, horn, locate or other physical control command.
+This refreshes the selected vehicles on that account and updates their entities. It is **not a physical ping or wake**, cannot prove the vehicle is awake, and may return cached data. It does not send a PIN check, OTP, horn, locate or control command.
 
-An explicit account target is required; there is no implicit “all accounts.” The action requires an administrator for direct calls; trusted HA automations may call it without a user context. Simultaneous manual requests for one account are rejected, with a 10-second cooldown between them. Normal polling and post-command status checks are unchanged. The action stays registered after an account unloads and gives a useful error instead of silently doing nothing. Cloud failures raise an action error; data lives in normal HA entities, not a service-response payload.
+Direct callers require administrator access; trusted automations may call it without a user context. There is no implicit all-accounts target. Overlapping manual requests are rejected and manual refreshes have a 10-second cooldown. Cloud failures raise an action error; readings remain in normal HA entities rather than a response payload.
 
-### Experimental remote controls (explicit opt-in)
+## Experimental lock and climate controls
 
-1. Save the **correct control PIN for this account** using Reconfigure if not already present.
-2. Open the integration's options and enable **Experimental remote controls**. This adds a native `lock` entity, and a native `climate` entity only when temperature limits, step and allowed durations are known.
-3. Choose the climate run duration in options (default 15 minutes). It must be one of the durations returned by your vehicle. Unknown capabilities or permissions fail closed.
-4. Perform the first tests while safely parked and physically able to verify the result. On hybrid models, preconditioning may run the engine: use a safe, ventilated location. **Do not build automatic unlocking rules before those supervised tests.**
+1. Save the correct control PIN using **Reconfigure**.
+2. Enable **Experimental remote controls** in options.
+3. Choose a climate duration actually reported as supported by the vehicle (default 15 minutes).
+4. Test while safely parked and physically able to verify the result. Hybrid preconditioning may run the engine: use a safe, ventilated location. Do not automate unlocking before supervised checks.
 
-Native actions:
+Native `lock.lock` / `lock.unlock` and `climate.turn_on` / `climate.turn_off` are supported. Climate uses OFF / HEAT_COOL and discovered temperature bounds/step. Changing temperature while off/unknown only records a local preference; when reported on it submits one command. Set HVAC mode and temperature separately—combined requests are rejected rather than silently ignored.
 
-- `lock.lock` / `lock.unlock` request locking/unlocking.
-- `climate.turn_on` / `climate.turn_off`, or OFF / HEAT_COOL mode, request cabin conditioning. HEAT_COOL is HA's model for the car choosing heating/cooling to achieve the target—not a separate vendor heat/cool command.
-- Changing temperature while off or unknown only remembers a local preference; explicitly turn on to operate the car. If telemetry reports climate on, changing temperature submits one command. Combined `hvac_mode` + temperature requests are rejected; use separate mode and temperature actions. The selected/requested temperature is separate from any last-reported cloud setpoint.
+**Accepted is not completed.** Locking/Unlocking appears immediately. After acceptance, up to five passive refreshes over at most 60 seconds improve feedback without resending the command. A credible requested-state report changes the native state; unchanged cached targets are not confirmation. A missing result ends pending feedback as unconfirmed/unknown. Climate gets the same bounded reads but does not claim terminal acknowledgement. MQTT completion messages are not currently consumed.
 
-Controls check the discovered vehicle and reported account permissions, select it, verify the PIN once, and submit one signed request. No wake/locate fallback, MQTT certificate, background command or automatic write retry is used. The explicit lock/climate command may itself wake/operate the vehicle.
+Commands are serialized, with at least 30 seconds between attempts. Timeouts/ambiguous outcomes are never automatically retried. Failed or inconclusive PIN checks pause controls until explicit PIN re-entry after checking the correct value in the app. Setup, polling, reauthentication and state restoration never operate the car.
 
-**Accepted is not completed.** The Command status sensor and control attributes distinguish submitting, accepted-but-unconfirmed, requested lock state reported, no lock-state confirmation, rejected, unknown outcome, and PIN safety blocking. Native lock/HVAC state comes from cloud telemetry and is **never switched optimistically to the requested final state**. This REST-only implementation does not receive terminal MQTT acknowledgements; a reported state is not a sequence-correlated command acknowledgement.
+## Freshness and polling
 
-**Responsive feedback:** the lock entity shows native **Locking / Unlocking** immediately while the request is in progress. After a lock or climate request is accepted, a background task performs at most **five extra passive status refreshes over up to 60 seconds**, rather than waiting for the normal five-minute poll. It never repeats the physical command, PIN check or wake operation. Refreshes cover the selected vehicles through the existing serialized coordinator. They stop on read errors/rate limits, unload or supersession; the normal polling interval is unchanged.
+Polling defaults to **five minutes**, configurable from 5–60 minutes. It reads existing cloud snapshots and never sends a wake command. Vehicle data may remain stale when parked. Fetch time is not observation time; ambiguous timezones are not guessed.
 
-Lock checks also stop early when the requested state is reported with a source time at/after the request, or a change from a known prior state when no usable source time is available. An unchanged cached target, stale timestamp or unknown prior state is not enough. HA then shows **Locked / Unlocked** from that report. If the budget expires without a credible report, pending feedback ends and the lock is **unknown** (or unavailable after a read failure), with **Lock state not confirmed — check vehicle** in Command status. A credible report of the opposite state remains visible instead of pretending the command succeeded. Later normal polling can recover the state. Climate receives the same bounded extra reads but does not claim terminal command confirmation.
+Invalid battery/HV placeholder frames do not publish misleading zeros. Genuine zeros are retained unless a known degraded-frame pattern is present. Empty replies keep prior primary readings in memory but mark the missing snapshot; network failures make entities unavailable. Optional settings/location reads run in separate throttled tasks and do not hold up lock feedback.
 
-Only one command can run per account, with at least 30 seconds between attempts. A timeout/ambiguous response is **not automatically retried** because the car may already have acted. Check it before trying again. Failed or inconclusive PIN verification (including cancellation mid-check) persistently pauses controls until you verify and explicitly re-enter the PIN in Reconfigure. Never try candidate PINs. A failed preparation/cancelled preparation sends no physical command.
+## Development and release checks
 
-A dedicated delegated account may reduce conflicts with the official app, but its permissions and simultaneous-session behaviour must be validated. Our discovery supports authorized vehicles; the controls require explicit server-reported authority. To switch accounts currently, remove the old integration entry and add the delegated one; duplicate VINs across account entries are intentionally blocked.
-
-### Credentials and maintenance
-
-- The account password or OTP is used once and **never saved** in the config entry. Access/refresh tokens are saved for automatic refresh, including rotated tokens. If the session is revoked, HA offers native reauthentication for the same account and saved method. OTP reauthentication still requires an explicit request to send the code.
-- The control PIN is optional for telemetry. Use **Reconfigure** to replace/remove it; blank keeps the existing value and any safety block. Explicitly entering a PIN clears the local safety block, so check it in the app before doing so. Verification happens only on a user-requested command, never startup or polling.
-- HA config-entry storage/backups are **not automatically encrypted**. Protect saved tokens, optional PIN, account email and vehicle identifiers. Diagnostics expose only an allowlisted structural summary, not these values or raw telemetry/GPS.
-- Logging into the official app can invalidate the HA session and vice versa. The integration never saves your password for repeated automatic login attempts.
-- The private API uses query parameters for refresh tokens, email OTP exchange and captcha verification (matching the upstream working protocol), over verified HTTPS. Phone OTP and password grants use form bodies. Query values can be credential-equivalent even when encoded/encrypted. Integration exceptions do not expose URLs, and redirects are disabled. Treat HTTP debug/proxy traces as sensitive; do not publish them.
-- Removal/unloading stops coordinator polling; it does not issue a cloud logout that could affect other clients.
-- No mobile-app binaries, vendor MQTT certificates or client private keys are distributed.
-
-## Standalone diagnostic probe
-
-The probe remains useful before installation or when investigating a response shape. It does not share saved credentials with HA.
-
-### What the probe does
-
-1. Prompts for account email and password (password entry is hidden).
-2. Signs in through the EU app gateway and lists vehicles authorized for that account.
-3. With `--telemetry`, asks which vehicle to inspect if necessary, obtains the vehicle-service session, and reads one existing cloud telemetry snapshot.
-4. Prints a reduced report: field names/types and selected telemetry values, without full VINs, location values or account-profile values. It can optionally save the report or a **private** raw capture.
-
-**No control PIN, wake-up, locate, lock, unlock, climate, vehicle binding/default selection, or MQTT connection.** Only four hard-coded API routes are permitted. No arbitrary endpoint execution. No automatic retries, background polling or automatic login refresh.
-
-Signing in can still invalidate your official mobile-app session. This is a third-party API and we cannot guarantee that account/session operations are side-effect-free. Use only an account and vehicle you are authorized to access.
-
-## Run locally
-
-Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/). From this repository:
-
-```sh
-uv sync --locked
-
-# Offline preview: no login, prompts or network calls from the script
-uv run python probe.py --plan --telemetry
-
-# First test: account login and vehicle discovery only
-uv run python probe.py --country-code 44
-
-# Read battery/range and other available telemetry; save a reduced report
-uv run python probe.py --country-code 44 --telemetry --output captures/report-1.json
-```
-
-`44` is the UK dialling code. Use the country code associated with your account (e.g. `39` Italy, `49` Germany), without `+`. This changes a country header, **not** the EU API host. Other account countries are not validated.
-
-The script asks for confirmation before making any request, then for email/password. It **does not accept a `--password` flag**, piped passwords, or environment-variable credentials, keeping passwords out of shell history and process arguments. An optional `--email you@example.com` flag avoids the email prompt, but the email then appears in shell history/process arguments.
-
-Passwords and session tokens are used in memory only, never intentionally persisted. Closing the process does not necessarily restore the mobile app's previous session; you may need to sign into the app again. Python cannot guarantee secure zeroization of in-memory strings.
-
-### Optional private raw capture
-
-If the reduced report isn't enough to understand the response shape:
-
-```sh
-uv run python probe.py --country-code 44 --telemetry \
-  --output captures/report-2.json \
-  --raw-output captures/private-2.json
-```
-
-Raw captures contain only discovery/telemetry responses, **never login responses**. Credential-like keys and known session tokens are redacted on a best-effort basis. Nevertheless **VINs, GPS coordinates, user identifiers and other private data may remain. Never post raw captures to GitHub or chat.** Review reduced reports before sharing too; schema field names and telemetry can still be identifying in unusual responses.
-
-Use `captures/` for **all** output files; this directory is gitignored. Files are created owner-only (`0600` on Unix), refuse overwrite and do not follow existing file symlinks. Do not put output in public/shared folders. File permissions are not encryption; consider backups and cloud sync. Choose a new filename each run.
-
-## Interpreting results
-
-- `vehicle_count`: vehicle records recognized in the server reply. Zero can mean no bound car, missing permissions, an API rejection or an unexpected response shape—not necessarily that you have no vehicle.
-- `observed_fields`: available battery/range/charge/climate/lock fields in their **original source format**. Typical candidates include `dumpEnergy` for battery, and `dynamicPureElectricRange`, `electricRange` or `pureElectricRange` for EV range. We do not assume that every model uses these identically.
-- `discovery_schema` / `realtime_schema`: all discovered field names with their types, not their values. Useful for building model-specific parsers. Unknown/free-form telemetry strings are omitted from `observed_fields` for privacy; they remain visible as field types here.
-- `discovery_status` / `realtime_status`: short machine status codes when present; free-form server messages are withheld.
-- `fetched_at_utc`: when the script fetched the cloud response, **not** when the vehicle measured it.
-
-A parked car may return stale data, placeholder values or no telemetry. Do not treat a zero as an empty battery without checking its meaning. Units and sentinel values have not yet been validated. For a useful comparison, run while the car is already charging or awake, and compare against its display/the app without unnecessarily starting a competing app session. The probe **does not wake it**. Do not enable climate just to make this test pass without understanding the effect.
-
-If login fails, do not repeatedly retry. Confirm you can sign in normally, that the account has a password, and that it belongs to this app/backend. For the **standalone probe**, OTP/challenge flows, phone-number login, automatic token refresh and anti-bot workarounds are out of scope; use the native HA flow for the additional sign-in methods. Network errors and HTTP failures are reported without printing server bodies or raw exceptions that could disclose secrets.
-
-Exit codes: `0` completed (or declined), `1` local/API failure, `2` usage error, `3` no recognized vehicle/telemetry payload, `130` cancelled. A successful fetch does not establish data freshness.
-
-## Development
+Automated tests are retained in source for regression coverage, but **never included in the installation ZIP**. Fixtures are synthetic and real sockets are blocked. No production credentials belong in tests or CI.
 
 ```sh
 uv sync --locked --group dev
 uv run pytest -q
-```
 
-To run the native Home Assistant flow/entity tests (separate Python 3.14 environment):
-
-```sh
+# Real Home Assistant harness, separate Python 3.14 environment
 cd tests/ha
 uv sync --locked
 uv run pytest -q
 ```
 
-The compatibility suite also runs against HA 2026.7.1 (the reference installation):
+The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run without ignored checks; catalogue requirements are documented in [docs/HACS.md](https://github.com/raldred/ha-omoda-jaecoo/blob/main/docs/HACS.md).
 
-```sh
-# From repository root
-HA_TEST_VERSION=2026.7.1 HA_TEST_PLUGIN_VERSION=0.13.345 \
-  uv run --no-project --python 3.14 \
-  --with pytest-homeassistant-custom-component==0.13.345 \
-  --with phonenumbers==9.0.40 \
-  pytest -c tests/ha/pyproject.toml -q tests/ha
-```
-
-Tests use synthetic credentials and fake responses; real sockets are blocked. No live credentials belong in CI. HTTPS certificate/hostname verification remains enabled and redirects are disabled. Environment proxies and `.netrc` are deliberately ignored for this probe; no TLS-bypass switch is provided.
-
-The HA integration lives under `custom_components/omoda_jaecoo/`, with an async API client independent of HA, native config/reauth/reconfigure flows, one coordinator per account, a pure telemetry parser, native sensor/binary-sensor/control/tracker platforms and allowlisted diagnostics. The client uses HA's shared HTTP session and core-provided aiohttp/cryptography/Pillow dependencies. HA installs the declared `phonenumbers` requirement for country-aware phone formatting. No NumPy or browser automation is needed for OTP delivery. The standalone probe remains separate to avoid a dependency on HA.
-
-Before treating controls as production-ready, perform supervised model-specific PIN/permission, lock/unlock, climate and session tests. Terminal command acknowledgement remains unimplemented without the vendor MQTT channel. Never turn passive sensor refresh into an implicit climate/wake command.
-
-## Preparing a release
-
-The integration version in `custom_components/omoda_jaecoo/manifest.json` is the release version (independent of the standalone probe's Python project version). Build only after committing the intended source:
+Build a release from a committed tree:
 
 ```sh
 python3 scripts/build_release.py --ref HEAD --expected-version 0.6.0
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 
-The standard-library builder creates a deterministic ZIP from the **committed Git tree**, plus checksums and `release.json` recording the exact commit/version. Local untracked files and dirty working-tree edits are not packaged. Existing artifacts are protected unless `--force` is supplied. Unsafe paths, symlinks, unexpected files and private-key material fail the build.
+The builder produces a deterministic component-only ZIP, checksums and metadata identifying the exact source commit. It rejects unsafe paths, unexpected files, symlinks and private-key material. The manual release workflow runs the tests first and creates a **draft pre-release**, never automatically publishing it.
 
-The **Prepare draft preview release** GitHub workflow is manually dispatched. It runs the offline suites for that commit, builds the artifacts, refuses existing tags/releases and creates only a **draft pre-release**—never an automatic public/stable release. Review the release notes and artifacts before any publication. The repository remains private; public release also needs a vendor-artwork rights review. HACS continues normal repository/source installation rather than ZIP-release mode.
+## Privacy, attribution and boundaries
 
-## Repository boundaries
+App archives, decompiled sources, analysis, captures, credentials, private keys and development environments are not distribution content. The early standalone prototype probe has been retired from the current source; use native HA setup and diagnostics.
 
-App archives, decompiled sources, binary dumps, analysis, local investigation notes, captures and credentials are gitignored and **not distributed**. The only explicitly requested app-artwork exception is the pair of local HA brand icons: vendor-owned imagery, **not MIT-licensed**. The source icon is 192px, upscaled to HA's 256/512px sizes. Keep the repository private pending permission review for public redistribution; this does not imply manufacturer affiliation. There are no bundled client certificates/private keys. Wire-protocol constants are app-level constants from the public reference implementation, not personal account credentials.
+The software is MIT-licensed. Manufacturer branding is separately attributed and **not covered by MIT**; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Brand use identifies the integration's intended products and does not imply endorsement or affiliation.
 
-Protocol work is based on [chery-connect-ha/omoda9-ha](https://github.com/chery-connect-ha/omoda9-ha), inspected at commit `7d80cd6a7215168f58d147cbd475c82e52cd3944`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and upstream MIT terms.
-
-Not affiliated with Omoda, Jaecoo, Chery or Home Assistant. APIs can change without notice. No manufacturer support or compatibility guarantee is implied.
+The API implementation references [chery-connect-ha/omoda9-ha](https://github.com/chery-connect-ha/omoda9-ha), with attribution retained. No vendor MQTT certificates/private keys are bundled. Protocol constants are application constants, not account credentials. The private API can change without notice; no manufacturer support or universal compatibility is implied.
