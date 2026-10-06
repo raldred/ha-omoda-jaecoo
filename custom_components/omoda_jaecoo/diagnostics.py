@@ -6,7 +6,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import (
-    CONF_CHARGE_TIME_UNIT,
     CONF_CONTROL_PIN,
     CONF_ENABLE_CHARGING_DETAILS,
     CONF_ENABLE_CONTROLS,
@@ -38,12 +37,7 @@ async def async_get_config_entry_diagnostics(
         "charging_details_enabled": bool(
             entry.options.get(CONF_ENABLE_CHARGING_DETAILS, False)
         ),
-        "charge_time_unit": (
-            entry.options.get(CONF_CHARGE_TIME_UNIT, "unverified")
-            if entry.options.get(CONF_CHARGE_TIME_UNIT, "unverified")
-            in ("unverified", "minutes", "seconds")
-            else "invalid"
-        ),
+        "charge_time_unit": "minutes",
         "optional_query_errors": sorted(set(coordinator._optional_errors.values()))
         if coordinator
         else [],

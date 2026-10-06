@@ -24,6 +24,17 @@ PLATFORMS = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Use saved tokens, never re-submit an account password on startup."""
+    # The official EU app establishes remainChargeTime as minutes. Drop obsolete
+    # user calibration without altering credentials, other options or entity IDs.
+    if "charge_time_unit" in entry.options:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                key: value
+                for key, value in entry.options.items()
+                if key != "charge_time_unit"
+            },
+        )
     try:
         tokens = TokenSet.from_dict(entry.data[CONF_TOKENS])
     except (ApiError, AttributeError, KeyError, TypeError, ValueError) as err:

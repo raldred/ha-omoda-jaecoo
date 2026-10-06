@@ -328,7 +328,7 @@ async def test_speed_units_and_extra_entities_disabled_by_default(
         (1, 0, "plugged_in"),
         (1, 1, "charging"),
         (0, 1, "unknown"),
-        (1, 2, "unknown"),
+        (1, 2, "plugged_in"),
         (None, None, "unknown"),
         (True, 1, "unknown"),
         (1, "charging", "unknown"),
@@ -360,11 +360,16 @@ async def test_charging_three_state_enum_no_inferred_completion(
         registry.async_get_entity_id(
             "sensor", DOMAIN, f"eu_{VIN}_charge_time_remaining"
         )
-        is None
+        is not None
     )
     assert (
-        registry.async_get_entity_id("sensor", DOMAIN, f"eu_{VIN}_charging_eta") is None
+        registry.async_get_entity_id("sensor", DOMAIN, f"eu_{VIN}_charging_eta")
+        is not None
     )
+    assert state(hass, "sensor", "charge_time_remaining").state == (
+        "120.0" if expected == "charging" else "unknown"
+    )
+    assert state(hass, "sensor", "charging_eta").state == "unknown"
     assert (
         registry.async_get_entity_id("sensor", DOMAIN, f"eu_{VIN}_charge_target")
         is None
@@ -377,10 +382,11 @@ async def test_charging_three_state_enum_no_inferred_completion(
     mock_api.async_charge_depth.assert_not_awaited()
 
 
-@pytest.mark.parametrize("unit,raw", [("minutes", 120), ("seconds", 7200)])
-async def test_verified_charge_duration_eta_and_native_power(
-    hass, entry, mock_api, unit, raw
+@pytest.mark.parametrize("legacy_unit", [None, "unverified", "minutes", "seconds"])
+async def test_automatic_minutes_and_eta_ignore_old_calibration(
+    hass, entry, mock_api, legacy_unit
 ):
+    raw = 120
     observed = dt_util.utcnow() - timedelta(minutes=2)
     mock_api.async_realtime.return_value = {
         "dumpEnergy": 70,
@@ -392,7 +398,9 @@ async def test_verified_charge_duration_eta_and_native_power(
         "totalVoltage": 350,
         "totalCurrent": 20,
     }
-    coordinator = await setup(hass, entry, {"charge_time_unit": unit})
+    options = {"charge_time_unit": legacy_unit} if legacy_unit is not None else {}
+    coordinator = await setup(hass, entry, options)
+    assert "charge_time_unit" not in entry.options
     remaining = state(hass, "sensor", "charge_time_remaining")
     assert float(remaining.state) == 120
     assert remaining.attributes[ATTR_UNIT_OF_MEASUREMENT] == "min"

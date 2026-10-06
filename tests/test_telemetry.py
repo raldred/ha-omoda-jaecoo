@@ -45,8 +45,8 @@ def block_network(monkeypatch):
         monkeypatch.setattr(socket.socket, name, blocked)
 
 
-def charging(data, observed=NOW, now=NOW, unit="unverified"):
-    return telemetry.parse_charging(data, observed, now, unit)
+def charging(data, observed=NOW, now=NOW):
+    return telemetry.parse_charging(data, observed, now)
 
 
 @pytest.mark.parametrize(
@@ -56,8 +56,8 @@ def charging(data, observed=NOW, now=NOW, unit="unverified"):
         (1, 0, "plugged_in"),
         (1, 1, "charging"),
         (0, 1, None),
-        (0, 2, None),
-        (1, 2, None),
+        (0, 2, "unplugged"),
+        (1, 2, "plugged_in"),
         (2, 0, None),
         (255, 255, None),
         (None, 0, None),
@@ -128,43 +128,55 @@ def test_no_power_inference_or_missing_as_zero():
 
 @pytest.mark.parametrize("raw", BAD_NUMBERS + [-1, 1_000_001])
 def test_invalid_remaining_unknown(raw):
-    result = charging({**ACTIVE, "remainChargeTime": raw}, unit="minutes")
+    result = charging({**ACTIVE, "remainChargeTime": raw})
     assert result.remaining_raw is None
     assert result.remaining_minutes is None
     assert result.estimated_finish is None
 
 
-def test_remaining_units_are_explicit_and_charging_only():
-    frame = {**ACTIVE, "remainChargeTime": "120"}
-    unverified = charging(frame)
-    assert unverified.remaining_raw == 120
-    assert unverified.remaining_minutes is None
-    assert unverified.estimated_finish is None
-    assert charging(frame, unit="minutes").remaining_minutes == 120
-    assert charging(frame, unit="seconds").remaining_minutes == 2
-    assert charging(frame, unit="hours").remaining_minutes is None
-    idle = charging({**frame, "chargeState": 0}, unit="minutes")
-    assert idle.remaining_raw == 120
+def test_official_app_minutes_contract_and_165_regression():
+    result = charging({**ACTIVE, "remainChargeTime": "165"})
+    assert result.remaining_raw == 165
+    assert result.remaining_minutes == 165
+    assert result.estimated_finish == NOW + timedelta(hours=2, minutes=45)
+    idle = charging({**ACTIVE, "chargeState": 0, "remainChargeTime": 165})
+    assert idle.remaining_raw == 165
     assert idle.remaining_minutes is None
     assert idle.estimated_finish is None
 
 
 @pytest.mark.parametrize(
-    "raw,unit,decoded",
+    "raw,decoded",
     [
-        (10080, "minutes", 10080),
-        (10081, "minutes", None),
-        (604800, "seconds", 10080),
-        (604801, "seconds", None),
-        (1_000_000, "unverified", None),
-        (0, "minutes", 0),
-        (90, "seconds", 1.5),
+        (10080, 10080),
+        (10081, None),
+        (604800, None),
+        (1_000_000, None),
+        (0, 0),
+        (90, 90),
     ],
 )
-def test_decoded_duration_at_most_seven_days(raw, unit, decoded):
-    result = charging({**ACTIVE, "remainChargeTime": raw}, unit=unit)
+def test_decoded_duration_at_most_seven_days(raw, decoded):
+    result = charging({**ACTIVE, "remainChargeTime": raw})
     assert result.remaining_raw == raw
     assert result.remaining_minutes == decoded
+
+
+@pytest.mark.parametrize(
+    "charge,expected",
+    [(0, "plugged_in"), (1, "charging"), (2, "plugged_in"), (3, None)],
+)
+def test_official_app_fast_connector_is_connection(charge, expected):
+    result = charging(
+        {
+            "chargeGunState": 0,
+            "fastChargingGunStatus": 1,
+            "chargeState": charge,
+            "remainChargeTime": "165",
+        }
+    )
+    assert result.status == expected
+    assert result.remaining_minutes == (165 if charge == 1 else None)
 
 
 @pytest.mark.parametrize(
@@ -182,7 +194,6 @@ def test_eta_from_fresh_observation_not_fetch_time(age, remaining, finish):
     result = charging(
         {**ACTIVE, "remainChargeTime": remaining},
         observed=NOW - timedelta(minutes=age),
-        unit="minutes",
     )
     assert result.estimated_finish == finish
 
@@ -196,7 +207,7 @@ def test_eta_from_fresh_observation_not_fetch_time(age, remaining, finish):
     ],
 )
 def test_eta_requires_aware_observation_and_now(observed, now):
-    result = charging({**ACTIVE, "remainChargeTime": 30}, observed, now, "minutes")
+    result = charging({**ACTIVE, "remainChargeTime": 30}, observed, now)
     assert result.remaining_minutes == 30
     assert result.estimated_finish is None
 
@@ -204,10 +215,7 @@ def test_eta_requires_aware_observation_and_now(observed, now):
 def test_eta_datetime_overflow_unknown():
     end = datetime.max.replace(tzinfo=timezone.utc)
     assert (
-        charging(
-            {**ACTIVE, "remainChargeTime": 1}, end, end, "minutes"
-        ).estimated_finish
-        is None
+        charging({**ACTIVE, "remainChargeTime": 1}, end, end).estimated_finish is None
     )
 
 

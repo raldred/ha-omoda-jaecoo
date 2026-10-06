@@ -27,7 +27,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_CHARGE_DEPTH_IS_TARGET,
-    CONF_CHARGE_TIME_UNIT,
     CONF_ENABLE_CHARGING_DETAILS,
     DOMAIN,
 )
@@ -229,11 +228,6 @@ async def async_setup_entry(
         for description in DESCRIPTIONS
         if (description.key != "command_status" or coordinator.controls_enabled)
         and (
-            description.key not in ("charge_time_remaining", "charging_eta")
-            or coordinator.options.get(CONF_CHARGE_TIME_UNIT, "unverified")
-            in ("minutes", "seconds")
-        )
-        and (
             description.key not in ("charge_schedule", "charging_depth_raw")
             or coordinator.options.get(CONF_ENABLE_CHARGING_DETAILS, False)
         )
@@ -309,6 +303,11 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
     @property
     def extra_state_attributes(self):
         key = self.entity_description.key
+        if key == "charging_eta":
+            return {
+                "estimate_basis": "vehicle sample plus reported remaining minutes",
+                "assumes_continuous_charging": True,
+            }
         if key == "charging_status":
             snapshot = (self.coordinator.data or {}).get(self._vin)
             charging = snapshot.charging if snapshot else None

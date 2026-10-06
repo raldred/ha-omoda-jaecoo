@@ -54,8 +54,17 @@ async def test_setup_selected_vehicle_and_unload(hass, entry, mock_api):
     assert not hass.states.async_all("button")
     assert not hass.states.async_all("lock")
     assert not hass.states.async_all("climate")
-    assert PASSWORD not in repr(hass.states.async_all())
-    assert PIN not in repr(hass.states.async_all())
+    # State repr includes random microseconds, which can coincidentally contain a
+    # short synthetic PIN. Check published values/attributes, not log timestamps.
+    published = json.dumps(
+        [
+            {"state": state.state, "attributes": dict(state.attributes)}
+            for state in hass.states.async_all()
+        ],
+        default=str,
+    )
+    assert PASSWORD not in published
+    assert PIN not in published
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED

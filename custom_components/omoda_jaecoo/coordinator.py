@@ -39,7 +39,6 @@ from .commands import (
 from .const import (
     CHARGING_QUERY_SECONDS,
     COMMAND_COOLDOWN_SECONDS,
-    CONF_CHARGE_TIME_UNIT,
     CONF_CLIMATE_DURATION,
     CONF_CONTROL_PIN,
     CONF_ENABLE_CHARGING_DETAILS,
@@ -187,8 +186,6 @@ def normalize_snapshot(
     data: dict[str, Any],
     now: datetime,
     previous: VehicleSnapshot | None = None,
-    *,
-    remaining_unit: str = "unverified",
 ) -> VehicleSnapshot:
     """Retain last readings on empty/asleep replies, without relabelling them fresh."""
     if not data:
@@ -201,7 +198,7 @@ def normalize_snapshot(
             False,
         )
     observed = observation_time(data, now)
-    charging = parse_charging(data, observed, now, remaining_unit)
+    charging = parse_charging(data, observed, now)
     extras = parse_extras(data)
     range_value = None
     for key in ("dynamicPureElectricRange", "electricRange", "pureElectricRange"):
@@ -331,9 +328,6 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                     raw,
                     dt_util.utcnow(),
                     previous.get(vin),
-                    remaining_unit=self.options.get(
-                        CONF_CHARGE_TIME_UNIT, "unverified"
-                    ),
                 )
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed(

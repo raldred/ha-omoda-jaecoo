@@ -1,6 +1,6 @@
 """Pure, conservative normalization of read-only cloud telemetry.
 
-Numeric codes and unverified units are retained without guessing their meaning.
+Known EU app field contracts are normalized; unsupported values stay unknown.
 No network, Home Assistant, account, or vehicle-control dependencies live here.
 """
 
@@ -74,30 +74,33 @@ def parse_charging(
     data: dict,
     observed_at: datetime | None,
     now: datetime,
-    remaining_unit: str = "unverified",
 ) -> ChargingData:
-    """Decode only the provisional 0/1 pairs; never infer power or time units."""
+    """Decode the EU app's charge states and minute-based remaining duration."""
     if not isinstance(data, dict):
         data = {}
     plug = _integer(data.get("chargeGunState"), 0, 255)
     charge = _integer(data.get("chargeState"), 0, 255)
     fast = _integer(data.get("fastChargingGunStatus"), 0, 255)
     schedule = _integer(data.get("appointmentChargeState"), 0, 255)
-    status = {(0, 0): "unplugged", (1, 0): "plugged_in", (1, 1): "charging"}.get(
-        (plug, charge)
-    )
+    # Official app: isChargingGunConnected is chargeGunState==1 OR
+    # fastChargingGunStatus==1; isCharging==1 and isChargingComplete==2.
+    status = None
+    if plug == 1 or fast == 1:
+        if charge == 1:
+            status = "charging"
+        elif charge in (0, 2):
+            status = "plugged_in"
+    elif plug == 0 and fast in (0, None) and charge in (0, 2):
+        status = "unplugged"
     power = (
         _number(data.get("chargingPower"), 0, 1000) if status == "charging" else None
     )
     raw = _number(data.get("remainChargeTime"), 0, 1_000_000)
     minutes = None
-    if status == "charging" and raw is not None:
-        if remaining_unit == "minutes":
-            minutes = raw
-        elif remaining_unit == "seconds":
-            minutes = raw / 60
-        if minutes is not None and minutes > 7 * 24 * 60:
-            minutes = None
+    # Proven in the supplied EU app: JSON remainChargeTime passes unchanged
+    # to RemainingChargingTimeWidget, which renders n//60 hours and n%60 min.
+    if status == "charging" and raw is not None and raw <= 7 * 24 * 60:
+        minutes = raw
     finish = None
     if minutes is not None and _aware(observed_at) and _aware(now):
         age = now - observed_at
