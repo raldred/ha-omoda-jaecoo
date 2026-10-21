@@ -14,7 +14,7 @@ This project is **not yet in the HACS default catalogue**. Add it as a custom re
 
 1. Open **HACS → ⋮ → Custom repositories**.
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
-3. Download **Omoda / Jaecoo**. Preview releases may require enabling beta versions in HACS.
+3. Download **Omoda / Jaecoo**. The full release is available without enabling beta versions.
 4. Restart Home Assistant Core.
 5. Open **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
 
