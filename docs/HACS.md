@@ -1,17 +1,27 @@
-# HACS installation and catalogue submission
+# HACS installation and releases
 
-## Custom repository
+## Install through HACS
 
-This is a Home Assistant **custom integration**, not an HA app/add-on. It can be installed as a HACS custom repository. It is **not yet included in the default HACS catalogue**.
+Omoda / Jaecoo is included in the HACS default catalogue. This is a Home Assistant **custom integration**, not an HA app/add-on.
+
+1. Open **HACS** and search for **Omoda / Jaecoo**.
+2. Open the integration and select **Download**.
+3. Restart Home Assistant Core.
+4. Open **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
+
+[Open Omoda / Jaecoo in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=raldred&repository=ha-omoda-jaecoo&category=integration)
+
+If you're updating an existing installation, keep your current integration entry; you don't need to add it again. Do not install alongside a different integration using the same `omoda_jaecoo` domain.
+
+### Custom repository fallback
+
+If it doesn't appear in HACS search:
 
 1. Open **HACS → ⋮ → Custom repositories**.
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` with type **Integration**.
-3. Download **Omoda / Jaecoo**, then restart HA Core.
-4. Add it through **Settings → Devices & services → Add integration**.
+3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-[Open the repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=raldred&repository=ha-omoda-jaecoo&category=integration)
-
-Do not install alongside a different integration using the same `omoda_jaecoo` domain. HACS installs from `custom_components/omoda_jaecoo/`; the separate release ZIP is for manual installation, not HACS `zip_release` mode.
+The full release doesn't require enabling beta versions. HACS installs from `custom_components/omoda_jaecoo/`; the separate release ZIP is for manual installation, not HACS `zip_release` mode.
 
 ## Repository preparation
 
@@ -33,14 +43,7 @@ The release workflow deliberately creates only a draft prerelease. After reviewi
 
 ## Default catalogue
 
-The owner/major contributor can submit a PR to https://github.com/hacs/default:
-
-1. Fork `hacs/default`, create a branch from its `master` branch.
-2. Add `"raldred/ha-omoda-jaecoo"` alphabetically to the root `integration` JSON list.
-3. Use its current PR template, allow maintainer edits, and provide links to a full (non-prerelease) release plus successful HACS/Hassfest runs without ignores.
-4. Do not claim unmet prerequisites or that HA/HACS has reviewed the software before it has.
-
-Catalogue inclusion requires maintainer review and can take months. Custom-repository installation does not need to wait for it.
+[HACS catalogue PR #11646](https://github.com/hacs/default/pull/11646) was merged on 24 October 2026. HACS advises that new entries can take up to eight hours to appear after merging; use the custom repository fallback above if the listing isn't visible yet.
 
 ## References
 

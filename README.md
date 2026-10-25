@@ -2,25 +2,34 @@
 
 An **unofficial Home Assistant custom integration** for vehicles using the European **OMODA JAECOO** app. It provides native account setup, cloud telemetry, optional location tracking and opt-in vehicle controls.
 
-**Preview release — UK-tested, EU backend only.** Not CarLinko, not a universal Chery integration, and not affiliated with the manufacturer or Home Assistant. Model-specific capabilities vary. Lock/climate requests have been reported working by the reference user, but broad compatibility and terminal command acknowledgements are not established.
+**UK-tested, EU backend only.** Not CarLinko, not a universal Chery integration, and not affiliated with the manufacturer or Home Assistant. Model-specific capabilities vary. Lock/climate requests have been reported working by the reference user, but broad compatibility and terminal command acknowledgements are not established.
 
 Requires **Home Assistant 2026.7.1+**. Offline integration tests run against 2026.7.1 and 2026.9.4.
 
 ## Installation
 
-### HACS custom repository
+### HACS (recommended)
 
-This project is **not yet in the HACS default catalogue**. Add it as a custom repository:
+Omoda / Jaecoo is included in the HACS default catalogue.
+
+1. Open **HACS** and search for **Omoda / Jaecoo**.
+2. Open the integration and select **Download**.
+3. Restart Home Assistant Core.
+4. Open **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
+
+[Open Omoda / Jaecoo in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=raldred&repository=ha-omoda-jaecoo&category=integration)
+
+If you're updating an existing installation, keep your current integration entry; you don't need to add it again. Do not install alongside a different integration using the same `omoda_jaecoo` domain/folder.
+
+#### Custom repository fallback
+
+If it doesn't appear in HACS search, add it manually:
 
 1. Open **HACS → ⋮ → Custom repositories**.
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
-3. Download **Omoda / Jaecoo**. The full release is available without enabling beta versions.
-4. Restart Home Assistant Core.
-5. Open **Settings → Devices & services → Add integration → Omoda / Jaecoo**.
+3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-[Open this repository in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=raldred&repository=ha-omoda-jaecoo&category=integration)
-
-Do not install alongside another custom integration using the same `omoda_jaecoo` domain/folder. Review and remove any conflict first.
+The full release doesn't require enabling beta versions.
 
 ### Manual installation
 
