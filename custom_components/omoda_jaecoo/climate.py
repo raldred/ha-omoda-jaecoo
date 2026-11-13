@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
@@ -14,48 +15,38 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util.unit_conversion import TemperatureConverter
 
+from .capability import allowed_durations, temperature_bounds
 from .entity import OmodaJaecooControlEntity
 
-
-def temperature_bounds(vehicle) -> tuple[float, float, float] | None:
-    """Do not invent control capabilities for vehicles missing model metadata."""
-    values = (
-        getattr(vehicle, "min_temperature", None),
-        getattr(vehicle, "max_temperature", None),
-        getattr(vehicle, "temperature_step", None),
-    )
-    if any(
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        for value in values
-    ):
-        return None
-    minimum, maximum, step = (float(value) for value in values)
-    durations = getattr(vehicle, "allowed_air_durations", ())
-    if (
-        not 14 <= minimum < maximum <= 33
-        or step not in (0.5, 1)
-        or not isinstance(durations, tuple)
-        or not durations
-        or any(
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or not 1 <= value <= 60
-            for value in durations
-        )
-    ):
-        return None
-    return minimum, maximum, step
+SERVICE_RAPID_HEAT = "rapid_heat"
+ATTR_ENABLE = "enable"
+ATTR_DURATION = "duration"
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = entry.runtime_data
+    # One-touch heating is a separate route with no distinguishable reported state,
+    # so it is an explicit action on the climate entity rather than an invented
+    # preset or switch that would claim to know whether it is still running.
+    entity_platform.async_get_current_platform().async_register_entity_service(
+        SERVICE_RAPID_HEAT,
+        {
+            vol.Optional(ATTR_ENABLE, default=True): cv.boolean,
+            vol.Optional(ATTR_TEMPERATURE): vol.Coerce(float),
+            # Coerced to float, never to int: truncating 20.7 into an allowed 20
+            # would silently send a duration nobody asked for.
+            vol.Optional(ATTR_DURATION): vol.Coerce(float),
+        },
+        "async_rapid_heat",
+    )
     if coordinator.controls_enabled:
         async_add_entities(
             OmodaJaecooClimate(coordinator, vin)
@@ -122,16 +113,46 @@ class OmodaJaecooClimate(OmodaJaecooControlEntity, ClimateEntity, RestoreEntity)
             return self.snapshot.target_temperature
         return self._selected_temperature
 
+    @property
+    def _service_temperature_unit(self) -> str:
+        """The unit a caller's temperature arrives in, as climate services use.
+
+        Home Assistant interprets service temperatures in the display unit, so
+        an unattached entity has nothing to convert from but its own.
+        """
+        hass = self.hass
+        return hass.config.units.temperature_unit if hass else self.temperature_unit
+
+    def _to_native_temperature(self, value: Any) -> Any:
+        """Convert a service input to Celsius exactly as climate.set_temperature does."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return value
+        return TemperatureConverter.convert(
+            float(value), self._service_temperature_unit, self.temperature_unit
+        )
+
     def _validate_temperature(self, value: Any) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ServiceValidationError(
                 "Choose a temperature within the vehicle's supported range and step."
             )
         temperature = float(value)
-        if (
-            not math.isfinite(temperature)
-            or not self.min_temp <= temperature <= self.max_temp
-        ):
+        if not math.isfinite(temperature):
+            raise ServiceValidationError(
+                "Choose a temperature within the vehicle's supported range and step."
+            )
+        if not self.min_temp <= temperature <= self.max_temp:
+            raise ServiceValidationError(
+                "Choose a temperature within the vehicle's supported range and step."
+            )
+        if self._service_temperature_unit != self.temperature_unit:
+            # Vehicle bounds are always Celsius, and almost no converted
+            # Fahrenheit request lands on a half-degree Celsius step, so snap to
+            # the nearest supported value. Celsius requests are never moved;
+            # out-of-range inputs were refused above, before rounding.
+            steps = round((temperature - self.min_temp) / self.target_temperature_step)
+            temperature = self.min_temp + steps * self.target_temperature_step
+        if not self.min_temp <= temperature <= self.max_temp:
             raise ServiceValidationError(
                 "Choose a temperature within the vehicle's supported range and step."
             )
@@ -153,6 +174,43 @@ class OmodaJaecooClimate(OmodaJaecooControlEntity, ClimateEntity, RestoreEntity)
             self._ensure_controls_available()
             await self.coordinator.async_climate(self._vin, True, temperature)
         self._selected_temperature = temperature
+        self.async_write_ha_state()
+
+    def _validate_duration(self, value: Any) -> int:
+        """Only a duration the vehicle itself reports; never clamp onto the set."""
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value != int(value)
+            or int(value) not in allowed_durations(self.coordinator.vehicles[self._vin])
+        ):
+            raise ServiceValidationError(
+                "Choose a run duration your vehicle reports as supported."
+            )
+        return int(value)
+
+    async def async_rapid_heat(
+        self,
+        enable: bool = True,
+        temperature: float | None = None,
+        duration: int | None = None,
+    ) -> None:
+        """Submit the one-touch heating request; acceptance is not completion."""
+        self._ensure_controls_available()
+        if type(enable) is not bool:
+            raise ServiceValidationError("Choose whether to start or stop heating.")
+        # The stored preference is already native; a caller's value is not. Both
+        # this action and climate.set_temperature therefore take the Home
+        # Assistant display unit, and the vehicle is only ever sent Celsius.
+        target = (
+            self._selected_temperature
+            if temperature is None
+            else self._validate_temperature(self._to_native_temperature(temperature))
+        )
+        if duration is not None:
+            duration = self._validate_duration(duration)
+        await self.coordinator.async_rapid_heat(self._vin, enable, target, duration)
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:

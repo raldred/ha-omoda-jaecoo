@@ -1,6 +1,6 @@
 [project]
 name = "ha-omoda-jaecoo-dev"
-version = "0.6.0"
+version = "0.7.0"
 description = "Development and offline tests for the Omoda / Jaecoo HA integration"
 requires-python = ">=3.10"
 dependencies = ["cryptography>=46,<49", "aiohttp>=3.12,<4", "Pillow>=11,<13", "phonenumbers==9.0.40"]

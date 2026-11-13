@@ -5,3 +5,36 @@ refresh_status:
       selector:
         config_entry:
           integration: omoda_jaecoo
+rapid_heat:
+  target:
+    entity:
+      integration: omoda_jaecoo
+      domain: climate
+  fields:
+    enable:
+      required: false
+      default: true
+      selector:
+        boolean:
+    temperature:
+      required: false
+      example: 22
+      # Deliberately unit-agnostic and wide, like climate.set_temperature: the
+      # value is read in the Home Assistant display unit, and the vehicle's own
+      # reported range and step are enforced after conversion to Celsius.
+      selector:
+        number:
+          min: 14
+          max: 95
+          step: 0.5
+          mode: box
+    duration:
+      required: false
+      example: 15
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: min
+          mode: box

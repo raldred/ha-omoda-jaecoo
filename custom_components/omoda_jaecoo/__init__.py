@@ -20,6 +20,7 @@ PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.LOCK,
     Platform.CLIMATE,
+    Platform.SWITCH,
     Platform.DEVICE_TRACKER,
 ]
 

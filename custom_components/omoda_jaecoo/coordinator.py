@@ -71,6 +71,9 @@ _LOGGER = logging.getLogger(__name__)
 # the previous read; the overall deadline also bounds slow network responses.
 LOCK_STATUS_DELAYS = (1, 4, 5, 10, 15)
 LOCK_STATUS_TIMEOUT = 60
+# Every explicit command this integration can submit. Anything else is refused
+# before opt-in, PIN or authority handling is reached.
+COMMAND_KINDS = frozenset({"lock", "climate", "rapid_heat", "rear_defrost"})
 
 
 @dataclass
@@ -619,20 +622,40 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
             self.entry, data={**self.entry.data, CONF_PIN_BLOCKED: True}
         )
 
+    def configured_duration(self) -> int:
+        """One reported-and-allowed duration is shared by every conditioning route."""
+        return self.entry.options.get(CONF_CLIMATE_DURATION, DEFAULT_CLIMATE_DURATION)
+
     async def async_lock(self, vin: str, locked: bool) -> None:
-        await self._async_command(vin, locked=locked)
+        await self._async_command(vin, "lock", locked=locked)
 
     async def async_climate(self, vin: str, on: bool, temperature: float) -> None:
-        await self._async_command(vin, on=on, temperature=temperature)
+        await self._async_command(vin, "climate", on=on, temperature=temperature)
+
+    async def async_rapid_heat(
+        self, vin: str, on: bool, temperature: float, duration: int | None = None
+    ) -> None:
+        await self._async_command(
+            vin, "rapid_heat", on=on, temperature=temperature, duration=duration
+        )
+
+    async def async_rear_defrost(
+        self, vin: str, on: bool, duration: int | None = None
+    ) -> None:
+        await self._async_command(vin, "rear_defrost", on=on, duration=duration)
 
     async def _async_command(
         self,
         vin: str,
+        kind: str,
         *,
         locked: bool | None = None,
         on: bool | None = None,
         temperature: float | None = None,
+        duration: int | None = None,
     ) -> None:
+        if kind not in COMMAND_KINDS:
+            raise ServiceValidationError("This vehicle command is not supported.")
         if not self.controls_enabled:
             raise ServiceValidationError(
                 "Enable remote controls in the integration options first."
@@ -665,9 +688,9 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
             )
         async with self._command_lock:
             self._last_command_at = time.monotonic()
-            self._last_command_kind[vin] = "lock" if locked is not None else "climate"
-            # Supersede older climate checks without cancelling an in-flight shared
-            # coordinator read (which could spuriously mark all entities unavailable).
+            self._last_command_kind[vin] = kind
+            # Supersede older conditioning checks without cancelling an in-flight
+            # shared read (which could spuriously mark all entities unavailable).
             self._climate_followup_tasks.pop(vin, None)
             lock_request = None
             if locked is not None:
@@ -680,19 +703,21 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 self._lock_requests[vin] = lock_request
             self.last_command_status[vin] = "submitting"
             self.async_update_listeners()
+            if duration is None:
+                duration = self.configured_duration()
             try:
-                if locked is not None:
+                if kind == "lock":
                     await self.command_client.async_lock(vin, pin, locked)
-                else:
+                elif kind == "climate":
                     await self.command_client.async_climate(
-                        vin,
-                        pin,
-                        on,
-                        temperature,
-                        self.entry.options.get(
-                            CONF_CLIMATE_DURATION, DEFAULT_CLIMATE_DURATION
-                        ),
+                        vin, pin, on, temperature, duration
                     )
+                elif kind == "rapid_heat":
+                    await self.command_client.async_rapid_heat(
+                        vin, pin, on, temperature, duration
+                    )
+                else:  # The command kind was checked against COMMAND_KINDS above.
+                    await self.command_client.async_rear_defrost(vin, pin, on, duration)
             except PinVerificationCancelled:
                 self._block_pin()
                 self.last_command_status[vin] = "pin_blocked"

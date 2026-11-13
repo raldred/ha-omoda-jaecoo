@@ -1,4 +1,4 @@
-"""Explicit, accepted-only EU lock/climate commands; no wake or write retries.
+"""Explicit, accepted-only EU body/conditioning commands; no wake or write retries.
 
 The caller owns opt-in, persistent PIN blocking, and account-wide serialization.
 No request occurs at import, construction, or argument validation time.
@@ -42,7 +42,12 @@ COMMAND_ROUTES = {
     "pin": (BFF, "/tsp/v1/app/cpm/checkPassword"),
     "lock": (TSP, "/asc/vehicleControl/lockControl"),
     "climate": (TSP, "/asc/vehicleControl/airControl"),
+    # Separate official routes; heating takes "duration", rear defrost takes "times".
+    "rapid_heat": (TSP, "/asc/vehicleControl/heatingControl"),
+    "rear_defrost": (TSP, "/asc/vehicleControl/backDefrostingControl"),
 }
+# Routes that can physically act on the car: an ambiguous outcome is never a failure.
+_PHYSICAL_ROUTES = frozenset({"lock", "climate", "rapid_heat", "rear_defrost"})
 _ACCEPTED = frozenset({"000000", "A00079"})
 _PREPARATION_SUCCESS = frozenset({"000000", "0", "200"})
 _REJECTED = frozenset(
@@ -62,6 +67,26 @@ _REJECTED = frozenset(
         "A00757",
         "A00285",
         "A00282",
+        # Definitive parameter rejections published in the official app's own code
+        # table for the conditioning routes: invalid/empty duration, air type and
+        # the individual heating switches. A wrong field value is reported, never
+        # silently retried with another encoding.
+        "A00606",
+        "A00613",
+        "A00615",
+        "A00616",
+        "A00617",
+        "A00618",
+        "A00619",
+        "A00620",
+        "A00621",
+        "A00637",
+        "A00638",
+        "A00639",
+        "A00640",
+        "A00769",
+        "A00770",
+        "A00772",
     }
 )
 
@@ -188,7 +213,7 @@ class CommandClient:
         if route not in COMMAND_ROUTES:
             raise CommandError("Endpoint is not in the command allowlist.")
         host, path = COMMAND_ROUTES[route]
-        physical = route in ("lock", "climate")
+        physical = route in _PHYSICAL_ROUTES
         failure = CommandOutcomeUnknown if physical else CommandError
         try:
             async with self._session.post(
@@ -237,6 +262,12 @@ class CommandClient:
     async def _authority(
         self, vin: str, credentials: ControlSession, category: int
     ) -> None:
+        """Unknown or denied authority sends nothing and never checks the PIN.
+
+        No dedicated permission id could be established for the heating or
+        rear-window routes, so they require the same climate authority as the
+        air-conditioning route: 204, plus core 2041 when the account reports it.
+        """
         result = await self._bff(
             "authority",
             credentials,
@@ -363,14 +394,8 @@ class CommandClient:
                 "Vehicle command acceptance is unknown; do not retry automatically."
             )
 
-    async def async_lock(self, vin: str, pin: str, locked: bool) -> None:
-        self._validate(vin, pin, locked)
-        await self._submit(vin, pin, 203, "lock", {"lockType": "0" if locked else "1"})
-
-    async def async_climate(
-        self, vin: str, pin: str, on: bool, temperature: float, duration: int
-    ) -> None:
-        vehicle = self._validate(vin, pin, on)
+    def _check_temperature(self, vehicle: Vehicle, temperature: float) -> None:
+        """Only discovered bounds; the E5 reports 16-30 and must not be widened."""
         low, high, step = (
             vehicle.min_temperature,
             vehicle.max_temperature,
@@ -397,14 +422,34 @@ class CommandClient:
             raise CommandError(
                 "Climate temperature is outside discovered vehicle capabilities."
             )
+
+    def _check_duration(self, vehicle: Vehicle, duration: int) -> None:
+        """maxAirDuration is the set of allowed values, so membership, not clamping.
+
+        Discovery publishes no separate heating/defrost duration, so the same
+        reported set gates every conditioning route and absence fails closed.
+        """
+        allowed = vehicle.allowed_air_durations
         if (
             type(duration) is not int
             or not 1 <= duration <= 60
-            or duration not in vehicle.allowed_air_durations
+            or not isinstance(allowed, tuple)
+            or duration not in allowed
         ):
             raise CommandError(
                 "Climate duration is not allowed by discovered vehicle capabilities."
             )
+
+    async def async_lock(self, vin: str, pin: str, locked: bool) -> None:
+        self._validate(vin, pin, locked)
+        await self._submit(vin, pin, 203, "lock", {"lockType": "0" if locked else "1"})
+
+    async def async_climate(
+        self, vin: str, pin: str, on: bool, temperature: float, duration: int
+    ) -> None:
+        vehicle = self._validate(vin, pin, on)
+        self._check_temperature(vehicle, temperature)
+        self._check_duration(vehicle, duration)
         await self._submit(
             vin,
             pin,
@@ -414,6 +459,50 @@ class CommandClient:
                 "airControlType": "1" if on else "0",
                 "airType": "1",
                 "temperature": f"{temperature:.1f}",
+                "times": str(duration),
+            },
+        )
+
+    async def async_rapid_heat(
+        self, vin: str, pin: str, on: bool, temperature: float, duration: int
+    ) -> None:
+        """Official one-touch heating route; its request field is duration, not times.
+
+        The official request also declares optional seat, steering-wheel and
+        windscreen/rear-window switches. They are deliberately omitted: this
+        integration must not actuate hardware it cannot confirm exists, nor clear
+        a switch the driver set in the car. A backend that requires them answers
+        with a documented parameter rejection, which is surfaced, never retried.
+        """
+        vehicle = self._validate(vin, pin, on)
+        self._check_temperature(vehicle, temperature)
+        self._check_duration(vehicle, duration)
+        await self._submit(
+            vin,
+            pin,
+            204,
+            "rapid_heat",
+            {
+                "airControlType": "1" if on else "0",
+                "airType": "1",
+                "temperature": f"{temperature:.1f}",
+                "duration": str(duration),
+            },
+        )
+
+    async def async_rear_defrost(
+        self, vin: str, pin: str, on: bool, duration: int
+    ) -> None:
+        """Independent rear-window route; its request is backDefrosting plus times."""
+        vehicle = self._validate(vin, pin, on)
+        self._check_duration(vehicle, duration)
+        await self._submit(
+            vin,
+            pin,
+            204,
+            "rear_defrost",
+            {
+                "backDefrosting": "1" if on else "0",
                 "times": str(duration),
             },
         )

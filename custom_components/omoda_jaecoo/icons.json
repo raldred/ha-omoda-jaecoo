@@ -1,7 +1,17 @@
 {
+  "entity": {
+    "switch": {
+      "rear_defrost": {
+        "default": "mdi:car-defrost-rear"
+      }
+    }
+  },
   "services": {
     "refresh_status": {
       "service": "mdi:cloud-refresh"
+    },
+    "rapid_heat": {
+      "service": "mdi:heat-wave"
     }
   }
 }
