@@ -137,10 +137,34 @@ Direct callers require administrator access; trusted automations may call it wit
 
 1. Save the correct control PIN using **Reconfigure**.
 2. Enable **Experimental remote controls** in options.
-3. Choose a climate duration actually reported as supported by the vehicle (default 15 minutes).
+3. Choose a conditioning run duration actually reported as supported by the vehicle (default 15 minutes). It applies to climate, rapid heating and rear-window requests.
 4. Test while safely parked and physically able to verify the result. Hybrid preconditioning may run the engine: use a safe, ventilated location. Do not automate unlocking before supervised checks.
 
 Native `lock.lock` / `lock.unlock` and `climate.turn_on` / `climate.turn_off` are supported. Climate uses OFF / HEAT_COOL and discovered temperature bounds/step. Changing temperature while off/unknown only records a local preference; when reported on it submits one command. Set HVAC mode and temperature separately—combined requests are rejected rather than silently ignored.
+
+### Rapid heating and rear-window defrost
+
+The official app has separate routes for one-touch heating and the rear window, so these are separate requests here too:
+
+```yaml
+action: omoda_jaecoo.rapid_heat
+target:
+  entity_id: climate.YOUR_VEHICLE
+data:
+  enable: true
+  temperature: 21
+  duration: 15
+```
+
+`enable: false` requests a stop. Temperature defaults to the climate entity's selected temperature and duration to the configured run duration; both are refused unless your vehicle reports that exact step/value, and the duration set is a **list of allowed minutes**, never clamped. The heating route also accepts seat, steering-wheel and window switches, including the rear window; this integration never sends any of them, so its rapid heating request only ever asks for cabin heating—use the rear-window switch if you want that too. There is no preset or "rapid heating is running" state, because the car reports none.
+
+**Rear-window defrost** is a separate switch, created only for vehicles that actually report a rear-window heater state; its state is the car's reported value, it is an assumed-state control, and an unknown reading stays unknown rather than showing off. There is no rear-window capability flag in discovery, so a car that never reports the state gets no switch rather than a guessed one.
+
+Both requests need the same opt-in, PIN, 30-second serialization and climate cloud permission as the existing climate command; no heating-specific permission id could be established, and none was invented. See [docs/protocol-evidence-conditioning.md](docs/protocol-evidence-conditioning.md) for the evidence and its limits.
+
+### Scheduled conditioning (optional blueprint)
+
+An optional automation blueprint can request conditioning and/or the rear window at a time you choose, with fail-closed cold, presence, battery and manual-enable gates. It is opt-in, creates no schedule by itself, and is **not** installed by HACS or the release ZIP—import or copy it yourself. Setup, inputs, sample configuration and limitations: [docs/scheduling.md](docs/scheduling.md).
 
 **Accepted is not completed.** Locking/Unlocking appears immediately. After acceptance, up to five passive refreshes over at most 60 seconds improve feedback without resending the command. A credible requested-state report changes the native state; unchanged cached targets are not confirmation. A missing result ends pending feedback as unconfirmed/unknown. Climate gets the same bounded reads but does not claim terminal acknowledgement. MQTT completion messages are not currently consumed.
 
@@ -171,7 +195,7 @@ The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run wit
 Build a release from a committed tree:
 
 ```sh
-python3 scripts/build_release.py --ref HEAD --expected-version 0.6.0
+python3 scripts/build_release.py --ref HEAD --expected-version 0.7.0
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 

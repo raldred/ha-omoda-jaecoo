@@ -214,6 +214,164 @@ def test_climate_flat_body_off_also_includes_temperature_and_times(on, value):
     assert session.calls[-1][0] == api.TSP + "/asc/vehicleControl/airControl"
 
 
+def conditioning(obj, route, *, on=True, temperature=21.0, duration=15, pin=PIN):
+    """The rear-window route has no temperature: never invent one for it."""
+    if route == "rapid_heat":
+        return obj.async_rapid_heat(VIN, pin, on, temperature, duration)
+    return obj.async_rear_defrost(VIN, pin, on, duration)
+
+
+@pytest.mark.parametrize("on,value", [(True, "1"), (False, "0")])
+def test_rapid_heat_wire_uses_duration_not_times(on, value):
+    obj, session = client(*accepted(category=204))
+    assert run(obj.async_rapid_heat(VIN, PIN, on, 21.5, 10)) is None
+    body = bodies(session)[-1]
+    assert body["airControlType"] == value
+    assert body["airType"] == "1" and body["temperature"] == "21.5"
+    # The official heating request field is duration; "times" belongs to other routes.
+    assert body["duration"] == "10" and "times" not in body
+    # No seat, steering-wheel or window switch is ever asserted by this integration.
+    assert set(body) == {
+        "airControlType",
+        "airType",
+        "temperature",
+        "duration",
+        "clientType",
+        "seq",
+        "taskId",
+        "vin",
+        "appId",
+        "sign",
+    }
+    assert session.calls[-1][0] == api.TSP + "/asc/vehicleControl/heatingControl"
+
+
+@pytest.mark.parametrize("on,value", [(True, "1"), (False, "0")])
+def test_rear_defrost_wire_is_independent_and_has_no_temperature(on, value):
+    obj, session = client(*accepted(category=204))
+    assert run(obj.async_rear_defrost(VIN, PIN, on, 5)) is None
+    body = bodies(session)[-1]
+    assert body["backDefrosting"] == value and body["times"] == "5"
+    assert set(body) == {
+        "backDefrosting",
+        "times",
+        "clientType",
+        "seq",
+        "taskId",
+        "vin",
+        "appId",
+        "sign",
+    }
+    assert session.calls[-1][0] == api.TSP + "/asc/vehicleControl/backDefrostingControl"
+
+
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_routes_require_climate_authority(route):
+    obj, session = client(Response(authority((203, 1), (204, 0))))
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route))
+    assert len(session.calls) == 1
+
+
+@pytest.mark.parametrize("child", [0, "0", True, "unknown"])
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_routes_respect_core_climate_authority(route, child):
+    obj, session = client(Response(authority((204, 1), (2041, child))))
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route))
+    assert len(session.calls) == 1
+
+
+@pytest.mark.parametrize("duration", [0, 6, 61, True, "15", 15.0, None, (15,)])
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_unreported_conditioning_duration_fails_before_any_request(route, duration):
+    obj, session = client()
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route, duration=duration))
+    assert not session.calls
+
+
+@pytest.mark.parametrize(
+    "temperature", [15, 31, 21.1, float("nan"), float("inf"), True, "21", None]
+)
+def test_rapid_heat_temperature_bounds_are_never_widened(temperature):
+    obj, session = client()
+    with pytest.raises(commands.CommandError):
+        run(obj.async_rapid_heat(VIN, PIN, True, temperature, 15))
+    assert not session.calls
+
+
+@pytest.mark.parametrize("on", [1, "true", None])
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_state_must_be_boolean(route, on):
+    obj, session = client()
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route, on=on))
+    assert not session.calls
+
+
+@pytest.mark.parametrize("pin", ["123", "abcd", "1234 ", None])
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_pin_validated_before_network(route, pin):
+    obj, session = client()
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route, pin=pin))
+    assert not session.calls
+
+
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_missing_conditioning_metadata_fails_closed(route):
+    # No reported duration set means no capability, for either conditioning route.
+    obj, session = client(vehicle=api.Vehicle(VIN, "Test", None, None))
+    with pytest.raises(commands.CommandError):
+        run(conditioning(obj, route))
+    assert not session.calls
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["A00606", "A00613", "A00615", "A00617", "A00639", "A00640", "A00769", "A00772"],
+)
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_documented_parameter_rejections_are_final(route, code):
+    obj, session = client(*accepted({"code": code, "msg": "private-msg"}, 204))
+    with pytest.raises(commands.CommandError) as caught:
+        run(conditioning(obj, route))
+    assert not isinstance(caught.value, commands.CommandOutcomeUnknown)
+    assert "private" not in str(caught.value) and len(session.calls) == 5
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        Response({}),
+        Response({"code": "A99999", "msg": "private-message"}),
+        Response(status=503),
+        Response(error=ValueError("private-response")),
+        TimeoutError("private-transport"),
+        aiohttp.ClientConnectionError("private-transport"),
+    ],
+)
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_unknown_outcome_never_retries(route, failure, caplog):
+    obj, session = client(*list(accepted(category=204))[:4], failure)
+    with pytest.raises(commands.CommandOutcomeUnknown) as caught:
+        run(conditioning(obj, route))
+    assert "private" not in str(caught.value) and "private" not in caplog.text
+    assert len(session.calls) == 5
+
+
+@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+def test_conditioning_cancellation_during_submission_is_unknown(route):
+    obj, session = client(
+        *list(accepted(category=204))[:4], asyncio.CancelledError("private-cancel")
+    )
+    with pytest.raises(commands.CommandCancelled) as caught:
+        run(conditioning(obj, route))
+    assert len(session.calls) == 5
+    assert "private" not in str(caught.value) and caught.value.__suppress_context__
+
+
 @pytest.mark.parametrize(
     "vin,pin,flag",
     [

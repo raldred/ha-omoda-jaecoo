@@ -1,0 +1,339 @@
+blueprint:
+  name: Omoda / Jaecoo scheduled conditioning
+  description: >-
+    Request cabin conditioning and/or rear-window defrost at a chosen time, with
+    optional cold, presence, battery and manual-enable gates.
+
+
+    EXPERIMENTAL AND OPT-IN. Remote conditioning physically operates the vehicle.
+    On fuel or hybrid models it may start the engine, so never schedule it while
+    the car is in a garage, carport or any enclosed space. Nothing is scheduled
+    until you create an automation from this blueprint, and you should leave that
+    automation disabled until you have tested each action manually while the car
+    is safely parked outdoors.
+
+
+    Honest limits: the cloud accepting a request does NOT prove the car acted.
+    This automation never claims success, never repeats a request and never
+    retries an ambiguous one. Check the vehicle and the integration's Command
+    status sensor. The integration allows one command at a time per account and
+    at least 30 seconds between commands, so when two controls are selected the
+    second request is deliberately delayed. Rapid heating as sent by this
+    integration asks for cabin heating only: the rear-window, seat and
+    steering-wheel switches that the heating route accepts are never sent, so
+    select the rear-window defrost separately if you want it.
+
+
+    Every optional gate fails closed: if a gate you selected is missing,
+    unknown, unavailable or non-numeric, no command is sent.
+  domain: automation
+  author: raldred
+  source_url: https://github.com/raldred/ha-omoda-jaecoo/blob/main/blueprints/automation/omoda_jaecoo/scheduled_conditioning.yaml
+  input:
+    schedule:
+      name: When to start
+      icon: mdi:clock-outline
+      input:
+        start_time:
+          name: Start time
+          description: >-
+            The time conditioning STARTS, not your departure time. Subtract the
+            lead time you want: for a 07:00 departure with a 20 minute lead,
+            enter 06:40. Keep the lead close to the run duration below.
+          selector:
+            time: {}
+        days:
+          name: Days
+          description: Days of the week this schedule may run.
+          default: [mon, tue, wed, thu, fri, sat, sun]
+          selector:
+            select:
+              multiple: true
+              mode: list
+              options:
+                - label: Monday
+                  value: mon
+                - label: Tuesday
+                  value: tue
+                - label: Wednesday
+                  value: wed
+                - label: Thursday
+                  value: thu
+                - label: Friday
+                  value: fri
+                - label: Saturday
+                  value: sat
+                - label: Sunday
+                  value: sun
+    controls:
+      name: What to request
+      icon: mdi:car-cog
+      input:
+        climate_entity:
+          name: Vehicle climate entity
+          description: >-
+            The Omoda / Jaecoo Climate entity for the vehicle to condition. It
+            exists only while experimental controls are enabled in the
+            integration options and a control PIN is saved.
+          selector:
+            entity:
+              filter:
+                - integration: omoda_jaecoo
+                  domain: climate
+        conditioning_mode:
+          name: Cabin conditioning
+          description: >-
+            "Rapid heating" uses the vehicle's own one-touch heating request.
+            "Climate entity" sets the target temperature and turns the climate
+            entity on. "None" leaves the cabin alone, for a defrost-only
+            schedule. Either cabin request is skipped when the car already
+            reports conditioning as running.
+          default: rapid_heat
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: Rapid heating (one-touch heating request)
+                  value: rapid_heat
+                - label: Climate entity (set temperature, then turn on)
+                  value: climate
+                - label: None (do not condition the cabin)
+                  value: none
+        target_temperature:
+          name: Target temperature
+          description: >-
+            Used by both cabin options, and read in your Home Assistant
+            temperature unit. The default of 21 suits Celsius; enter a
+            Fahrenheit value such as 70 if that is your unit. Your vehicle works
+            in Celsius and reports its own range and step: a converted
+            Fahrenheit value is matched to the nearest supported step, and
+            anything outside the reported range is refused without a command
+            being sent.
+          default: 21
+          selector:
+            number:
+              min: 14
+              max: 95
+              step: 0.5
+              mode: box
+        run_duration:
+          name: Run duration
+          description: >-
+            Minutes of heating requested by the rapid heating action only. Your
+            car reports which durations it allows, and others are refused
+            without being sent. Leave at 0 to use the duration configured in the
+            integration options. The rear-window defrost switch takes no
+            duration of its own, so it always uses that configured option.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 60
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        defrost_entity:
+          name: Rear-window defrost switch
+          description: >-
+            Optional. The integration only creates this switch for vehicles that
+            actually report a rear-window heater state. Leave empty to skip it.
+            It is skipped when the car already reports it as on.
+          default: []
+          selector:
+            entity:
+              filter:
+                - integration: omoda_jaecoo
+                  domain: switch
+    gates:
+      name: Optional conditions
+      icon: mdi:shield-check
+      collapsed: true
+      input:
+        temperature_entity:
+          name: Cold or frost gate sensor
+          description: >-
+            Optional outside-air or weather temperature sensor. Do NOT choose the
+            car's cabin temperature sensor: a warm cabin says nothing about frost
+            on the glass, and a cold cabin is not a forecast. A local outdoor or
+            weather-forecast temperature is the only meaningful choice. Leave
+            empty to run regardless of temperature.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+                - domain: weather
+        temperature_threshold:
+          name: Cold or frost threshold
+          description: >-
+            Run only when the sensor above reads below this value, in the same
+            unit as that sensor. This is a starting point, not a frost forecast:
+            glass can frost while the air is still a few degrees above freezing,
+            and this gate cannot predict frost.
+          default: 3
+          selector:
+            number:
+              min: -30
+              max: 40
+              step: 0.5
+              mode: box
+        presence_entity:
+          name: Presence or location gate
+          description: >-
+            Optional person, device tracker or similar. The schedule runs only
+            when it matches the state below. Do not rely on this for security.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: person
+                - domain: device_tracker
+                - domain: input_select
+                - domain: input_boolean
+        presence_state:
+          name: Required presence state
+          description: The exact state the presence entity must report, for example home or on.
+          default: home
+          selector:
+            text: {}
+        battery_entity:
+          name: Minimum battery sensor
+          description: >-
+            Optional battery percentage sensor, usually this integration's own
+            Battery sensor for the same vehicle. Readings can be stale while the
+            car is asleep.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: battery
+        battery_minimum:
+          name: Minimum battery level
+          description: Skip the schedule when the battery sensor above reads below this percentage.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: box
+        enable_entity:
+          name: Manual enable helper
+          description: >-
+            Optional toggle helper. When selected, the schedule runs only while
+            that helper is on, which gives you a one-tap way to skip tomorrow
+            without editing the automation.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+mode: single
+max_exceeded: silent
+triggers:
+  - trigger: time
+    at: !input start_time
+variables:
+  conditioning_mode: !input conditioning_mode
+  target_temperature: !input target_temperature
+  run_duration: !input run_duration
+  climate_entity: !input climate_entity
+  defrost_entity: !input defrost_entity
+  temperature_entity: !input temperature_entity
+  temperature_threshold: !input temperature_threshold
+  presence_entity: !input presence_entity
+  presence_state: !input presence_state
+  battery_entity: !input battery_entity
+  battery_minimum: !input battery_minimum
+  enable_entity: !input enable_entity
+  # Unselected optional inputs arrive as an empty list; normalize to "".
+  defrost_id: "{{ defrost_entity if defrost_entity is string else '' }}"
+  temperature_id: "{{ temperature_entity if temperature_entity is string else '' }}"
+  presence_id: "{{ presence_entity if presence_entity is string else '' }}"
+  battery_id: "{{ battery_entity if battery_entity is string else '' }}"
+  enable_id: "{{ enable_entity if enable_entity is string else '' }}"
+conditions:
+  - condition: time
+    weekday: !input days
+  - alias: Manual enable helper, when chosen, must be on
+    condition: template
+    value_template: "{{ enable_id == '' or is_state(enable_id, 'on') }}"
+  - alias: Presence gate, when chosen, must match exactly
+    condition: template
+    value_template: "{{ presence_id == '' or states(presence_id) == presence_state }}"
+  - alias: Cold gate, when chosen, needs a usable reading below the threshold
+    condition: template
+    value_template: >-
+      {% if temperature_id == '' %}
+        true
+      {% else %}
+        {% set reading = state_attr(temperature_id, 'temperature')
+           if temperature_id.startswith('weather.') else states(temperature_id) %}
+        {{ reading is not none
+           and reading | float(1e9) < temperature_threshold | float(-1e9) }}
+      {% endif %}
+  - alias: Battery gate, when chosen, needs a usable reading at or above the minimum
+    condition: template
+    value_template: >-
+      {% if battery_id == '' %}
+        true
+      {% else %}
+        {{ states(battery_id) | float(-1e9) >= battery_minimum | float(1e9) }}
+      {% endif %}
+actions:
+  - alias: Decide which requests are still needed
+    variables:
+      # Reported conditioning is real cloud state; unknown must not block a
+      # deliberate request, but a confirmed running cabin makes one pointless.
+      cabin_needed: >-
+        {{ conditioning_mode in ['rapid_heat', 'climate']
+           and not is_state(climate_entity, 'heat_cool') }}
+      defrost_needed: "{{ defrost_id != '' and not is_state(defrost_id, 'on') }}"
+      requested_duration: "{{ run_duration | int(0) }}"
+  - alias: Cabin conditioning
+    choose:
+      # Two explicit rapid-heating branches: an omitted duration must stay
+      # omitted so the integration uses its own configured, reported value.
+      - conditions: >-
+          {{ cabin_needed and conditioning_mode == 'rapid_heat'
+             and requested_duration > 0 }}
+        sequence:
+          - action: omoda_jaecoo.rapid_heat
+            target:
+              entity_id: !input climate_entity
+            data:
+              enable: true
+              temperature: !input target_temperature
+              duration: !input run_duration
+      - conditions: "{{ cabin_needed and conditioning_mode == 'rapid_heat' }}"
+        sequence:
+          - action: omoda_jaecoo.rapid_heat
+            target:
+              entity_id: !input climate_entity
+            data:
+              enable: true
+              temperature: !input target_temperature
+      - conditions: "{{ cabin_needed and conditioning_mode == 'climate' }}"
+        sequence:
+          # While the car is off or unknown this only stores the local preference;
+          # turning the entity on is the single command that is submitted.
+          - action: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: !input target_temperature
+          - action: climate.turn_on
+            target:
+              entity_id: !input climate_entity
+  - alias: Rear-window defrost, serialized behind the integration cooldown
+    choose:
+      - conditions: "{{ defrost_needed }}"
+        sequence:
+          - delay:
+              seconds: "{{ 35 if cabin_needed else 0 }}"
+          - action: switch.turn_on
+            target:
+              entity_id: !input defrost_entity
