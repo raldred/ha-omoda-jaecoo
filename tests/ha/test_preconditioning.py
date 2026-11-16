@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import voluptuous as vol
 from conftest import DOMAIN, PIN, VIN
 from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -24,7 +25,11 @@ from custom_components.omoda_jaecoo.capability import (
     rear_window_heating_reported,
 )
 from custom_components.omoda_jaecoo.climate import OmodaJaecooClimate
-from custom_components.omoda_jaecoo.commands import CommandClient
+from custom_components.omoda_jaecoo.commands import (
+    CommandClient,
+    CommandError,
+    CommandOutcomeUnknown,
+)
 from custom_components.omoda_jaecoo.coordinator import COMMAND_KINDS
 from custom_components.omoda_jaecoo.switch import OmodaJaecooRearDefrost
 
@@ -78,6 +83,7 @@ class FakeCoordinator(DataUpdateCoordinator):
         self.async_climate = AsyncMock(side_effect=self._accepted)
         self.async_rapid_heat = AsyncMock(side_effect=self._accepted)
         self.async_rear_defrost = AsyncMock(side_effect=self._accepted)
+        self.async_rear_defrost_with_climate = AsyncMock(side_effect=self._accepted)
 
     def configured_duration(self):
         return 15
@@ -216,7 +222,10 @@ async def test_rapid_heat_action_defaults_to_local_preference_and_option_duratio
         ({"duration": 10}, (VIN, True, 21, 10)),
         ({"duration": 10.0}, (VIN, True, 21, 10)),
         ({"temperature": 16, "duration": 5}, (VIN, True, 16.0, 5)),
-        ({"enable": "no", "temperature": "30", "duration": "15"}, (VIN, False, 30.0, 15)),
+        (
+            {"enable": "no", "temperature": "30", "duration": "15"},
+            (VIN, False, 30.0, 15),
+        ),
     ],
 )
 async def test_rapid_heat_action_passes_validated_values(
@@ -336,7 +345,9 @@ async def test_rapid_heat_rejects_an_ambiguous_switch_request(coordinator, value
 @pytest.mark.parametrize(
     "condition", ["disabled", "blocked", "unavailable", "missing_snapshot"]
 )
-async def test_conditioning_controls_fail_closed_without_sending(coordinator, condition):
+async def test_conditioning_controls_fail_closed_without_sending(
+    coordinator, condition
+):
     if condition == "disabled":
         coordinator.controls_enabled = False
     elif condition == "blocked":
@@ -462,9 +473,7 @@ async def test_coordinator_rear_defrost_keeps_explicit_duration(hass, entry, moc
     assert coord.last_command_status[VIN] == "accepted_unconfirmed"
 
 
-async def test_second_conditioning_command_is_refused_not_queued(
-    hass, entry, mock_api
-):
+async def test_second_conditioning_command_is_refused_not_queued(hass, entry, mock_api):
     coord, client = await real_setup(hass, entry)
     await coord.async_rapid_heat(VIN, True, 21.0)
     with pytest.raises(HomeAssistantError, match="30 seconds"):
@@ -521,3 +530,183 @@ async def test_pin_block_pauses_conditioning_commands(hass, entry, mock_api):
         await coord.async_rapid_heat(VIN, True, 21.0)
     client.async_rear_defrost.assert_not_awaited()
     client.async_rapid_heat.assert_not_awaited()
+
+
+@pytest.mark.parametrize("on", [False, True])
+@pytest.mark.parametrize("cabin_on", [False, True, None])
+async def test_dedicated_switch_never_commands_cabin_climate(
+    hass, entry, coordinator, on, cabin_on
+):
+    coordinator.data = {
+        VIN: snapshot(rear_defrost=not on, climate_on=cabin_on, target_temperature=24.5)
+    }
+    await setup(hass, entry, coordinator)
+    await hass.services.async_call(
+        "switch",
+        "turn_on" if on else "turn_off",
+        {"entity_id": entity_id(hass, "switch", REAR_WINDOW_HEATING)},
+        blocking=True,
+    )
+    coordinator.async_rear_defrost.assert_awaited_once_with(VIN, on)
+    coordinator.async_rear_defrost_with_climate.assert_not_awaited()
+    coordinator.async_climate.assert_not_awaited()
+    assert coordinator.data[VIN].climate_on is cabin_on
+    assert coordinator.data[VIN].target_temperature == 24.5
+
+
+@pytest.mark.parametrize("on", [False, True])
+async def test_explicit_coupled_action_through_existing_switch(
+    hass, entry, coordinator, on
+):
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    coordinator.data = {VIN: snapshot(rear_defrost=not on, climate_on=not on)}
+    await setup(hass, entry, coordinator)
+    await hass.services.async_call(
+        DOMAIN,
+        "rear_defrost_with_climate",
+        {
+            "entity_id": entity_id(hass, "switch", REAR_WINDOW_HEATING),
+            "enable": on,
+            "temperature_celsius": 23.5,
+            "duration": 10,
+            "acknowledge_climate_change": True,
+        },
+        blocking=True,
+    )
+    coordinator.async_rear_defrost_with_climate.assert_awaited_once_with(
+        VIN,
+        on,
+        23.5,
+        10,
+        acknowledge_climate_change=True,
+    )
+    coordinator.async_rear_defrost.assert_not_awaited()
+    assert state(hass, "switch", REAR_WINDOW_HEATING).state == ("off" if on else "on")
+    assert coordinator.data[VIN].climate_on is not on  # No optimistic state.
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("acknowledge_climate_change", False),
+        ("acknowledge_climate_change", None),
+        ("temperature_celsius", 31),
+        ("temperature_celsius", 21.1),
+        ("temperature_celsius", True),
+        ("duration", True),
+        ("duration", 6),
+        ("duration", 10.1),
+    ],
+)
+async def test_coupled_action_refuses_unsafe_inputs(
+    hass, entry, coordinator, field, value
+):
+    await setup(hass, entry, coordinator)
+    data = {
+        "entity_id": entity_id(hass, "switch", REAR_WINDOW_HEATING),
+        "enable": False,
+        "temperature_celsius": 23.5,
+        "duration": 10,
+        "acknowledge_climate_change": True,
+        field: value,
+    }
+    with pytest.raises((ServiceValidationError, vol.Invalid)):
+        await hass.services.async_call(
+            DOMAIN, "rear_defrost_with_climate", data, blocking=True
+        )
+    coordinator.async_rear_defrost_with_climate.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["enable", "temperature_celsius", "duration", "acknowledge_climate_change"],
+)
+async def test_coupled_action_has_no_guessed_defaults(
+    hass, entry, coordinator, missing
+):
+    await setup(hass, entry, coordinator)
+    data = {
+        "entity_id": entity_id(hass, "switch", REAR_WINDOW_HEATING),
+        "enable": False,
+        "temperature_celsius": 23.5,
+        "duration": 10,
+        "acknowledge_climate_change": True,
+    }
+    del data[missing]
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            DOMAIN, "rear_defrost_with_climate", data, blocking=True
+        )
+    coordinator.async_rear_defrost_with_climate.assert_not_awaited()
+
+
+@pytest.mark.parametrize("on", [False, True])
+async def test_coordinator_coupled_route_uses_existing_safety_and_feedback(
+    hass, entry, mock_api, on
+):
+    coord, client = await real_setup(hass, entry)
+    with patch.object(coord, "_start_climate_followup") as followup:
+        await coord.async_rear_defrost_with_climate(
+            VIN, on, 23.5, 10, acknowledge_climate_change=True
+        )
+        followup.assert_called_once_with(VIN)
+    client.async_rear_defrost_with_climate.assert_awaited_once_with(
+        VIN, PIN, on, 23.5, 10, acknowledge_climate_change=True
+    )
+    client.async_rear_defrost.assert_not_awaited()
+    assert coord.last_command_status[VIN] == "accepted_unconfirmed"
+    with pytest.raises(HomeAssistantError, match="30 seconds"):
+        await coord.async_rear_defrost_with_climate(
+            VIN, on, 23.5, 10, acknowledge_climate_change=True
+        )
+    assert client.async_rear_defrost_with_climate.await_count == 1
+
+
+@pytest.mark.parametrize(
+    "condition", ["disabled", "blocked", "unavailable", "unselected", "no_ack"]
+)
+async def test_coupled_coordinator_fails_closed(hass, entry, mock_api, condition):
+    coord, client = await real_setup(hass, entry)
+    if condition == "disabled":
+        hass.config_entries.async_update_entry(
+            entry, options={"enable_controls": False}
+        )
+    elif condition == "blocked":
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "pin_blocked": True}
+        )
+    elif condition == "unavailable":
+        coord.last_update_success = False
+    elif condition == "unselected":
+        coord.selected_vins = []
+    with pytest.raises(HomeAssistantError):
+        await coord.async_rear_defrost_with_climate(
+            VIN,
+            False,
+            23.5,
+            10,
+            acknowledge_climate_change=condition != "no_ack",
+        )
+    client.async_rear_defrost_with_climate.assert_not_awaited()
+    client.async_rear_defrost.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "error,status",
+    [
+        (CommandOutcomeUnknown("unknown"), "unknown_outcome"),
+        (CommandError("Vehicle command was rejected (A00084)."), "rejected"),
+    ],
+)
+async def test_coupled_coordinator_does_not_retry_or_fallback(
+    hass, entry, mock_api, error, status
+):
+    coord, client = await real_setup(hass, entry)
+    client.async_rear_defrost_with_climate.side_effect = error
+    with pytest.raises(HomeAssistantError):
+        await coord.async_rear_defrost_with_climate(
+            VIN, False, 23.5, 10, acknowledge_climate_change=True
+        )
+    assert client.async_rear_defrost_with_climate.await_count == 1
+    client.async_rear_defrost.assert_not_awaited()
+    assert coord.last_command_status[VIN] == status

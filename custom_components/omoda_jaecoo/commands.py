@@ -260,13 +260,16 @@ class CommandClient:
         )
 
     async def _authority(
-        self, vin: str, credentials: ControlSession, category: int
+        self,
+        vin: str,
+        credentials: ControlSession,
+        category: int,
+        required: tuple[int, ...] = (),
     ) -> None:
         """Unknown or denied authority sends nothing and never checks the PIN.
 
-        No dedicated permission id could be established for the heating or
-        rear-window routes, so they require the same climate authority as the
-        air-conditioning route: 204, plus core 2041 when the account reports it.
+        Route-specific required children must be explicitly allowed, not absent.
+        The legacy climate gate also respects core 2041 whenever reported.
         """
         result = await self._bff(
             "authority",
@@ -299,8 +302,19 @@ class CommandClient:
                     else None
                 )
         if states.get(category) is None or states[category] <= 0:
+            if category == 232:
+                raise CommandError(
+                    "Dedicated rear defrost requires permission 232 and 2321; authority is denied or unknown. "
+                    "No command was sent. The separate rear_defrost_with_climate action requires "
+                    "204, 2041 and 20411 and also starts or stops cabin climate."
+                )
             raise CommandError(
                 "Vehicle control is not known to be authorized; no command was sent."
+            )
+        if any((states.get(child) or 0) <= 0 for child in required):
+            raise CommandError(
+                f"Required vehicle permissions {category}/{','.join(str(child) for child in required)} "
+                "are denied or unknown; no command was sent."
             )
         if (
             category == 204
@@ -357,7 +371,14 @@ class CommandClient:
             ) from None
 
     async def _submit(
-        self, vin: str, pin: str, category: int, route: str, fields: dict[str, str]
+        self,
+        vin: str,
+        pin: str,
+        category: int,
+        route: str,
+        fields: dict[str, str],
+        *,
+        required: tuple[int, ...] = (),
     ) -> None:
         try:
             credentials = await self._api.async_control_session(vin)
@@ -365,7 +386,7 @@ class CommandClient:
             raise CommandError(
                 "Control session is unavailable; no command was sent."
             ) from None
-        await self._authority(vin, credentials, category)
+        await self._authority(vin, credentials, category, required)
         task_id = await self._task_id(vin, pin, credentials)
         timestamp = int(time.time() * 1000)
         result = await self._post(
@@ -381,7 +402,7 @@ class CommandClient:
         code = result.get("code")
         if isinstance(code, str) and code in _REJECTED:
             raise CommandError(
-                "Vehicle command was rejected; no automatic retry will be made."
+                f"Vehicle command was rejected ({code}); no automatic retry will be made."
             )
         if (
             not isinstance(code, str)
@@ -499,10 +520,49 @@ class CommandClient:
         await self._submit(
             vin,
             pin,
-            204,
+            232,
             "rear_defrost",
             {
                 "backDefrosting": "1" if on else "0",
                 "times": str(duration),
             },
+            required=(2321,),
+        )
+
+    async def async_rear_defrost_with_climate(
+        self,
+        vin: str,
+        pin: str,
+        on: bool,
+        temperature: float,
+        duration: int,
+        *,
+        acknowledge_climate_change: bool,
+    ) -> None:
+        """Explicit coupled action, never an automatic fallback for the switch.
+
+        Upstream only establishes coupled ON/ON and OFF/OFF semantics. OFF stops
+        cabin HVAC too. Do not invent an independent OFF encoding or infer HVAC
+        state from stale telemetry.
+        """
+        vehicle = self._validate(vin, pin, on)
+        if acknowledge_climate_change is not True:
+            raise CommandError(
+                "This route also starts or stops cabin climate; explicit acknowledgement is required."
+            )
+        self._check_temperature(vehicle, temperature)
+        self._check_duration(vehicle, duration)
+        await self._submit(
+            vin,
+            pin,
+            204,
+            "climate",
+            {
+                "airControlType": "1" if on else "0",
+                "airType": "1",
+                "temperature": f"{temperature:.1f}",
+                "times": str(duration),
+                "backDefrosting": "1" if on else "0",
+            },
+            required=(2041, 20411),
         )

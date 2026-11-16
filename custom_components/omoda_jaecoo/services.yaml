@@ -1,3 +1,64 @@
+rear_defrost_with_climate:
+  name: Rear defrost and cabin climate together
+  description: >-
+    Explicit alternate airControl route. ON starts cabin climate and rear defrost;
+    OFF stops BOTH, including cabin heating. This is not independent rear OFF.
+    Resets the climate run timer and applies the supplied Celsius setpoint.
+    No automatic fallback or retry. Acceptance does not confirm vehicle action.
+  target:
+    entity:
+      integration: omoda_jaecoo
+      domain: switch
+  fields:
+    enable:
+      name: Start both functions
+      description: False stops cabin climate as well as rear defrost.
+      required: true
+      selector:
+        boolean:
+    temperature_celsius:
+      name: Cabin setpoint in Celsius
+      description: Required explicitly; never inferred from stale vehicle state.
+      required: true
+      selector:
+        number:
+          min: 14
+          max: 33
+          step: 0.5
+          unit_of_measurement: °C
+          mode: box
+    duration:
+      name: Run duration
+      description: Must be one of the vehicle's reported supported durations.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: min
+          mode: box
+    acknowledge_climate_change:
+      name: I understand this also starts or stops cabin climate
+      description: Must be true, including when switching both functions off.
+      required: true
+      selector:
+        boolean:
+diagnose_rear_defrost_permissions:
+  name: Diagnose rear defrost permissions
+  description: >-
+    Read only the five rear-defrost authority IDs using the loaded account's
+    confirmed cached session. Never logs in, refreshes credentials, checks a PIN,
+    selects a default vehicle or sends a car command. Reports selected vehicles
+    in configured order, without vehicle or credential identifiers. Returns a
+    safe response and logs REAR_DEFROST_PERMISSION_SNAPSHOT. Missing differs
+    from denied; unknown is not permission to act.
+  fields:
+    config_entry_id:
+      required: true
+      selector:
+        config_entry:
+          integration: omoda_jaecoo
 refresh_status:
   fields:
     config_entry_id:
