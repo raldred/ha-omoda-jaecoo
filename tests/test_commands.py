@@ -102,7 +102,7 @@ def client(*responses, vehicle=VEHICLE):
 
 def accepted(final=None, category=203):
     return (
-        Response(authority((category, 1))),
+        Response(authority((category, 1), *([(2321, 1)] if category == 232 else []))),
         Response({"code": "000000", "data": [{"vin": VIN}]}),
         Response(GOOD),
         Response({"code": "000000", "data": {"taskId": "synthetic-task"}}),
@@ -248,7 +248,7 @@ def test_rapid_heat_wire_uses_duration_not_times(on, value):
 
 @pytest.mark.parametrize("on,value", [(True, "1"), (False, "0")])
 def test_rear_defrost_wire_is_independent_and_has_no_temperature(on, value):
-    obj, session = client(*accepted(category=204))
+    obj, session = client(*accepted(category=232))
     assert run(obj.async_rear_defrost(VIN, PIN, on, 5)) is None
     body = bodies(session)[-1]
     assert body["backDefrosting"] == value and body["times"] == "5"
@@ -266,7 +266,7 @@ def test_rear_defrost_wire_is_independent_and_has_no_temperature(on, value):
 
 
 @pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
-def test_conditioning_routes_require_climate_authority(route):
+def test_conditioning_routes_refuse_unrelated_or_denied_authority(route):
     obj, session = client(Response(authority((203, 1), (204, 0))))
     with pytest.raises(commands.CommandError):
         run(conditioning(obj, route))
@@ -274,7 +274,7 @@ def test_conditioning_routes_require_climate_authority(route):
 
 
 @pytest.mark.parametrize("child", [0, "0", True, "unknown"])
-@pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
+@pytest.mark.parametrize("route", ["rapid_heat"])
 def test_conditioning_routes_respect_core_climate_authority(route, child):
     obj, session = client(Response(authority((204, 1), (2041, child))))
     with pytest.raises(commands.CommandError):
@@ -334,10 +334,16 @@ def test_missing_conditioning_metadata_fails_closed(route):
 )
 @pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
 def test_documented_parameter_rejections_are_final(route, code):
-    obj, session = client(*accepted({"code": code, "msg": "private-msg"}, 204))
+    obj, session = client(
+        *accepted(
+            {"code": code, "msg": "private-msg"},
+            232 if route == "rear_defrost" else 204,
+        )
+    )
     with pytest.raises(commands.CommandError) as caught:
         run(conditioning(obj, route))
     assert not isinstance(caught.value, commands.CommandOutcomeUnknown)
+    assert f"({code})" in str(caught.value)
     assert "private" not in str(caught.value) and len(session.calls) == 5
 
 
@@ -354,7 +360,9 @@ def test_documented_parameter_rejections_are_final(route, code):
 )
 @pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
 def test_conditioning_unknown_outcome_never_retries(route, failure, caplog):
-    obj, session = client(*list(accepted(category=204))[:4], failure)
+    obj, session = client(
+        *list(accepted(category=232 if route == "rear_defrost" else 204))[:4], failure
+    )
     with pytest.raises(commands.CommandOutcomeUnknown) as caught:
         run(conditioning(obj, route))
     assert "private" not in str(caught.value) and "private" not in caplog.text
@@ -364,7 +372,8 @@ def test_conditioning_unknown_outcome_never_retries(route, failure, caplog):
 @pytest.mark.parametrize("route", ["rapid_heat", "rear_defrost"])
 def test_conditioning_cancellation_during_submission_is_unknown(route):
     obj, session = client(
-        *list(accepted(category=204))[:4], asyncio.CancelledError("private-cancel")
+        *list(accepted(category=232 if route == "rear_defrost" else 204))[:4],
+        asyncio.CancelledError("private-cancel"),
     )
     with pytest.raises(commands.CommandCancelled) as caught:
         run(conditioning(obj, route))
@@ -506,6 +515,7 @@ def test_known_rejections_do_not_retry(code):
     with pytest.raises(commands.CommandError) as caught:
         run(obj.async_lock(VIN, PIN, True))
     assert not isinstance(caught.value, commands.CommandOutcomeUnknown)
+    assert f"({code})" in str(caught.value)
     assert "private" not in str(caught.value) and len(session.calls) == 5
 
 

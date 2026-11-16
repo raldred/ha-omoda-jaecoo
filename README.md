@@ -29,7 +29,7 @@ If it doesn't appear in HACS search, add it manually:
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
 3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-The full release doesn't require enabling beta versions.
+The stable 0.7.1 release doesn't require enabling beta versions. It includes the conditioning features from the 0.7.0 preview. See the [0.7.1 release notes](docs/releases/0.7.1.md).
 
 ### Manual installation
 
@@ -144,7 +144,7 @@ Native `lock.lock` / `lock.unlock` and `climate.turn_on` / `climate.turn_off` ar
 
 ### Rapid heating and rear-window defrost
 
-The official app has separate routes for one-touch heating and the rear window, so these are separate requests here too:
+Rapid heating has been confirmed working on the tested E5. It requests cabin heating through the official app's one-touch heating route:
 
 ```yaml
 action: omoda_jaecoo.rapid_heat
@@ -160,7 +160,30 @@ data:
 
 **Rear-window defrost** is a separate switch, created only for vehicles that actually report a rear-window heater state; its state is the car's reported value, it is an assumed-state control, and an unknown reading stays unknown rather than showing off. There is no rear-window capability flag in discovery, so a car that never reports the state gets no switch rather than a guessed one.
 
-Both requests need the same opt-in, PIN, 30-second serialization and climate cloud permission as the existing climate command; no heating-specific permission id could be established, and none was invented. See [docs/protocol-evidence-conditioning.md](docs/protocol-evidence-conditioning.md) for the evidence and its limits.
+All conditioning requests need remote-control opt-in, a saved PIN and the shared 30-second command cooldown. Rapid heating uses the existing climate permission check. The dedicated rear-window switch requires positive rear-window permissions, not just climate permission. Fitted hardware does not establish remote access: the tested E5's backend denies rear-window remote permission despite its fitted heater. Neither rear-window route has been physically validated, and availability depends on the vehicle and account.
+
+#### Rear defrost with cabin heating
+
+`omoda_jaecoo.rear_defrost_with_climate` is an explicit alternate route, not an automatic fallback. It targets the rear-window switch and requires separate positive permissions for rear defrost through climate. Turning it on starts or reconfigures cabin heating, applies the supplied setpoint and resets the run timer. **Turning it off also stops cabin climate, including heating.** You must acknowledge this for either direction:
+
+```yaml
+action: omoda_jaecoo.rear_defrost_with_climate
+target:
+  entity_id: switch.YOUR_REAR_WINDOW_DEFROST
+data:
+  enable: true
+  temperature_celsius: 21
+  duration: 15
+  acknowledge_climate_change: true
+```
+
+The temperature is always Celsius for this action. Supply a temperature and duration your vehicle reports as supported. Use the dedicated switch for independent rear-window OFF if your account permits it. A rejected request never switches routes automatically.
+
+#### Check rear-window permissions
+
+Administrators can run `omoda_jaecoo.diagnose_rear_defrost_permissions` from **Developer tools → Actions**, selecting the loaded account. This read-only action checks cloud authority using only an already confirmed cached session. It does not log in, refresh credentials, check a PIN, wake the vehicle or send an actuator command. If that session isn't available, it fails rather than signing in. Its response and `REAR_DEFROST_PERMISSION_SNAPSHOT` log entry omit vehicle and credential identifiers; missing or unknown permissions are not treated as allowed.
+
+See [docs/protocol-evidence-conditioning.md](docs/protocol-evidence-conditioning.md) for the permission checks and evidence behind both routes.
 
 ### Scheduled conditioning (optional blueprint)
 
@@ -195,7 +218,7 @@ The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run wit
 Build a release from a committed tree:
 
 ```sh
-python3 scripts/build_release.py --ref HEAD --expected-version 0.7.0
+python3 scripts/build_release.py --ref HEAD --expected-version 0.7.1
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 

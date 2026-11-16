@@ -644,6 +644,28 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
     ) -> None:
         await self._async_command(vin, "rear_defrost", on=on, duration=duration)
 
+    async def async_rear_defrost_with_climate(
+        self,
+        vin: str,
+        on: bool,
+        temperature: float,
+        duration: int,
+        *,
+        acknowledge_climate_change: bool,
+    ) -> None:
+        if acknowledge_climate_change is not True:
+            raise ServiceValidationError(
+                "This action also starts or stops cabin climate; acknowledge this explicitly."
+            )
+        await self._async_command(
+            vin,
+            "rear_defrost",
+            on=on,
+            temperature=temperature,
+            duration=duration,
+            coupled_climate=True,
+        )
+
     async def _async_command(
         self,
         vin: str,
@@ -653,6 +675,7 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
         on: bool | None = None,
         temperature: float | None = None,
         duration: int | None = None,
+        coupled_climate: bool = False,
     ) -> None:
         if kind not in COMMAND_KINDS:
             raise ServiceValidationError("This vehicle command is not supported.")
@@ -715,6 +738,19 @@ class OmodaJaecooCoordinator(DataUpdateCoordinator[dict[str, VehicleSnapshot]]):
                 elif kind == "rapid_heat":
                     await self.command_client.async_rapid_heat(
                         vin, pin, on, temperature, duration
+                    )
+                elif kind == "rear_defrost" and coupled_climate:
+                    if on is None or temperature is None:
+                        raise CommandError(
+                            "Explicit climate state and temperature are required."
+                        )
+                    await self.command_client.async_rear_defrost_with_climate(
+                        vin,
+                        pin,
+                        on,
+                        temperature,
+                        duration,
+                        acknowledge_climate_change=True,
                     )
                 else:  # The command kind was checked against COMMAND_KINDS above.
                     await self.command_client.async_rear_defrost(vin, pin, on, duration)
