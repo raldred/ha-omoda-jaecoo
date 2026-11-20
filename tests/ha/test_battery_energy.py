@@ -74,6 +74,15 @@ async def test_estimate_metadata_and_privacy(hass, entry, mock_api, soc, expecte
     assert float(hass.states.get(battery_id).state) == soc
 
 
+async def test_user_capacity_and_soc_estimate(hass, entry, mock_api):
+    coordinator = await setup(hass, entry, mock_api, {VIN: 58.9}, soc=80)
+    entity = make_entity(coordinator)
+    assert float(hass.states.get(entity_id(hass)).state) == pytest.approx(47.12)
+    assert entity.native_value == pytest.approx(47.12)
+    assert entity.suggested_display_precision == 1
+    mock_api.async_realtime.assert_awaited_once_with(VIN)
+
+
 async def test_no_early_rounding(hass, entry, mock_api):
     coordinator = await setup(hass, entry, mock_api, {VIN: 60.12345})
     coordinator.async_set_updated_data(
@@ -122,17 +131,17 @@ async def test_huge_integer_soc_is_rejected_without_float_overflow(
 
 
 @pytest.mark.parametrize(
-    "change, freshness",
+    "change, freshness, expected",
     [
-        ({"observed_at": None}, "unknown"),
-        ({"has_payload": False}, "no_data"),
-        ({"degraded": True}, "unreliable"),
-        ({"age_minutes": 120}, "stale"),
-        ({"age_minutes": -1}, "unknown"),
+        ({"observed_at": None}, "unknown", 43.2),
+        ({"has_payload": False}, "no_data", 43.2),
+        ({"degraded": True}, "unreliable", None),
+        ({"age_minutes": 120}, "stale", 43.2),
+        ({"age_minutes": -1}, "unknown", 43.2),
     ],
 )
-async def test_only_fresh_current_samples_are_estimated(
-    hass, entry, mock_api, change, freshness
+async def test_cached_samples_are_estimated_unless_degraded(
+    hass, entry, mock_api, change, freshness, expected
 ):
     coordinator = await setup(hass, entry, mock_api, {VIN: 60})
     if "age_minutes" in change:
@@ -142,8 +151,21 @@ async def test_only_fresh_current_samples_are_estimated(
     coordinator.async_set_updated_data({VIN: replace(coordinator.data[VIN], **change)})
     await hass.async_block_till_done()
     state = hass.states.get(entity_id(hass))
-    assert state.state == "unknown"
+    entity = make_entity(coordinator)
+    if expected is None:
+        assert state.state == "unknown"
+        assert entity.native_value is None
+    else:
+        assert float(state.state) == pytest.approx(expected)
+        assert entity.native_value == pytest.approx(expected)
     assert state.attributes["freshness"] == freshness
+    for _ in range(3):
+        assert entity.extra_state_attributes["freshness"] == freshness
+        assert entity.native_value == expected
+    mock_api.async_realtime.assert_awaited_once_with(VIN)
+    mock_api.async_location.assert_not_awaited()
+    mock_api.async_charge_schedule.assert_not_awaited()
+    mock_api.async_charge_depth.assert_not_awaited()
     # Last-reported battery semantics are intentionally unchanged.
     battery_id = er.async_get(hass).async_get_entity_id(
         "sensor", DOMAIN, f"eu_{VIN}_battery"

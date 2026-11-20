@@ -311,9 +311,9 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
             if (
                 capacity is None
                 or not self.coordinator.last_update_success
-                or snapshot.freshness() != "current"
-                or snapshot.observed_at is None
-                or snapshot.observed_at > dt_util.utcnow()
+                # Cached SOC is still useful: match the battery sensor's last-known
+                # reading, while retaining source time/freshness in attributes.
+                or snapshot.degraded
                 or isinstance(soc, bool)
                 or not isinstance(soc, (int, float))
                 or not 0 <= soc <= 100

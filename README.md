@@ -29,7 +29,7 @@ If it doesn't appear in HACS search, add it manually:
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
 3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-The stable release doesn't require enabling beta versions. See the [0.7.2 release notes](docs/releases/0.7.2.md).
+The stable release doesn't require enabling beta versions. See the [0.7.3 release notes](docs/releases/0.7.3.md).
 
 ### Manual installation
 
@@ -86,7 +86,7 @@ To add an estimated kWh reading, open **Settings → Devices & services → Omod
 
 **Estimated battery energy remaining** is calculated as `usable capacity × battery percentage ÷ 100`. For example, 72% of a configured 60 kWh usable battery is 43.2 kWh. Capacity is set separately for each vehicle; no battery size is assumed or looked up from its model name.
 
-This is an estimate, not a measured API value, and it doesn't adjust for degradation, temperature or battery buffers. It shows unknown when the battery reading is missing, stale or unreliable, and unavailable when the cloud connection fails. It doesn't add any API requests or change polling.
+This is an estimate, not a measured API value, and it doesn't adjust for degradation, temperature or battery buffers. It uses the last-known battery percentage even when the car is asleep or the reading is stale. The source report time and freshness are included as attributes, so the estimate isn't presented as a fresh measurement. Missing or unreliable battery data shows unknown; a failed cloud connection makes the entity unavailable. It doesn't add any API requests or change polling.
 
 ### Additional entities, disabled by default
 
@@ -226,7 +226,7 @@ The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run wit
 Build a release from a committed tree:
 
 ```sh
-python3 scripts/build_release.py --ref HEAD --expected-version 0.7.2
+python3 scripts/build_release.py --ref HEAD --expected-version 0.7.3
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 
