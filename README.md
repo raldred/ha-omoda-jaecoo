@@ -29,7 +29,7 @@ If it doesn't appear in HACS search, add it manually:
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
 3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-The stable release doesn't require enabling beta versions. See the [0.8.0 release notes](docs/releases/0.8.0.md).
+The stable release doesn't require enabling beta versions. See the [0.7.2 release notes](docs/releases/0.7.2.md).
 
 ### Manual installation
 
@@ -226,7 +226,7 @@ The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run wit
 Build a release from a committed tree:
 
 ```sh
-python3 scripts/build_release.py --ref HEAD --expected-version 0.8.0
+python3 scripts/build_release.py --ref HEAD --expected-version 0.7.2
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 

@@ -6,7 +6,7 @@ on:
       version:
         description: Committed manifest version to package (without a v prefix)
         required: true
-        default: "0.8.0"
+        default: "0.7.2"
         type: string
 
 permissions:
