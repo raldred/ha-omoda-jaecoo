@@ -89,8 +89,9 @@
       "init": {
         "title": "Telemetry, privacy and optional controls",
         "description": "Polling only reads cloud snapshots and never wakes the car. Enabling remote controls adds native Lock and Climate entities, the Rapid heating action, and a Rear-window defrost switch for cars that report one; using them can physically unlock or operate the vehicle. Commands are experimental, require the correct PIN and permissions, and have NOT been validated on your car. API acceptance does not prove completion: check the Command status sensor and the vehicle. No MQTT acknowledgement or automatic wake is used. Start with a supervised test while safely parked. The run duration must match a duration reported by your vehicle.",
-        "data": {"poll_interval": "Polling interval", "enable_controls": "Enable experimental remote controls", "climate_duration": "Conditioning run duration", "enable_location": "Record last-reported vehicle location", "enable_charging_details": "Read experimental charging settings", "charge_depth_is_target": "Charging depth is a verified target percentage"},
+        "data": {"poll_interval": "Polling interval", "usable_battery_capacities": "Usable battery capacity (kWh)", "enable_controls": "Enable experimental remote controls", "climate_duration": "Conditioning run duration", "enable_location": "Record last-reported vehicle location", "enable_charging_details": "Read experimental charging settings", "charge_depth_is_target": "Charging depth is a verified target percentage"},
         "data_description": {
+          "usable_battery_capacities": "Enter usable (not gross) battery capacity in kWh only if known, or leave blank/remove a value to disable the estimate for that vehicle. Remaining energy is an estimate from reported charge percentage, with no temperature or degradation adjustment.",
           "climate_duration": "Used for climate, rapid heating and rear-window defrost requests. Your car reports which durations it allows; others are refused without being sent.",
           "enable_location": "Opt-in map tracker. Reads cached location without waking the car. Coordinates may be stale and are recorded in HA history/backups; disabling this does not erase history. Do not use it alone for security or automatic unlocking.",
           "enable_charging_details": "Additional read-only schedule/depth queries, at most every 15 minutes. Support varies by car; no charging setting is changed.",
@@ -99,6 +100,7 @@
       }
     },
     "error": {
+      "invalid_capacity": "Enter a finite number from 0.1 to 500 kWh for selected vehicles only, or remove the value. Use usable capacity, not gross capacity.",
       "invalid_interval": "Choose a whole number from 5 to 60 minutes.",
       "invalid_duration": "Choose a whole number from 1 to 60 minutes. The vehicle must also report this duration as supported.",
       "charging_details_required": "Enable charging settings reads before interpreting charging depth as a target percentage.",
@@ -140,6 +142,7 @@
   "entity": {
     "sensor": {
       "battery": {"name": "Battery"},
+      "estimated_battery_energy": {"name": "Estimated battery energy remaining"},
       "electric_range": {"name": "Electric range"},
       "odometer": {"name": "Odometer"},
       "cabin_temperature": {"name": "Cabin temperature"},

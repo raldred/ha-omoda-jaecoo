@@ -7,7 +7,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from test_commands import Response, VIN, authority, client, commands, load
+from test_commands import VIN, Response, authority, client, commands, load
 
 diag = load("permission_diagnostic")
 

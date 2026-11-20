@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -14,6 +16,7 @@ from homeassistant.const import (
     EntityCategory,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
     UnitOfLength,
     UnitOfPower,
     UnitOfSpeed,
@@ -24,7 +27,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
+from .battery_capacity import usable_battery_capacity
 from .const import (
     CONF_CHARGE_DEPTH_IS_TARGET,
     CONF_ENABLE_CHARGING_DETAILS,
@@ -52,6 +57,14 @@ DESCRIPTIONS = (
         translation_key="battery",
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+    ),
+    SensorEntityDescription(
+        key="estimated_battery_energy",
+        translation_key="estimated_battery_energy",
+        device_class=SensorDeviceClass.ENERGY_STORAGE,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
     ),
@@ -228,6 +241,10 @@ async def async_setup_entry(
         for description in DESCRIPTIONS
         if (description.key != "command_status" or coordinator.controls_enabled)
         and (
+            description.key != "estimated_battery_energy"
+            or usable_battery_capacity(coordinator.options, vin) is not None
+        )
+        and (
             description.key not in ("charge_schedule", "charging_depth_raw")
             or coordinator.options.get(CONF_ENABLE_CHARGING_DETAILS, False)
         )
@@ -288,6 +305,22 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
         snapshot = (self.coordinator.data or {}).get(self._vin)
         if snapshot is None:
             return None
+        if key == "estimated_battery_energy":
+            capacity = usable_battery_capacity(self.coordinator.options, self._vin)
+            soc = snapshot.battery
+            if (
+                capacity is None
+                or not self.coordinator.last_update_success
+                or snapshot.freshness() != "current"
+                or snapshot.observed_at is None
+                or snapshot.observed_at > dt_util.utcnow()
+                or isinstance(soc, bool)
+                or not isinstance(soc, (int, float))
+                or not 0 <= soc <= 100
+                or not math.isfinite(soc)
+            ):
+                return None
+            return capacity * soc / 100
         if key == "freshness":
             return snapshot.freshness()
         if key in EXTRA_KEYS:
@@ -303,6 +336,30 @@ class OmodaJaecooSensor(CoordinatorEntity[OmodaJaecooCoordinator], SensorEntity)
     @property
     def extra_state_attributes(self):
         key = self.entity_description.key
+        if key == "estimated_battery_energy":
+            snapshot = (self.coordinator.data or {}).get(self._vin)
+            return {
+                "estimate_basis": "user_configured_usable_capacity",
+                "usable_battery_capacity_kwh": usable_battery_capacity(
+                    self.coordinator.options, self._vin
+                ),
+                "observed_at": (
+                    snapshot.observed_at.isoformat()
+                    if snapshot and snapshot.observed_at
+                    else None
+                ),
+                "freshness": (
+                    "unknown"
+                    if snapshot
+                    and snapshot.observed_at
+                    and snapshot.observed_at > dt_util.utcnow()
+                    else snapshot.freshness()
+                    if snapshot
+                    else "no_data"
+                ),
+                "estimated": True,
+                "estimation_method": "usable_capacity_times_state_of_charge",
+            }
         if key == "charging_eta":
             return {
                 "estimate_basis": "vehicle sample plus reported remaining minutes",

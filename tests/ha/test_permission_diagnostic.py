@@ -6,7 +6,11 @@ import pytest
 import voluptuous as vol
 from conftest import DOMAIN, VIN
 from homeassistant.core import Context
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, Unauthorized
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceValidationError,
+    Unauthorized,
+)
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 

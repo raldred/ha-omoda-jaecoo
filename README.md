@@ -29,7 +29,7 @@ If it doesn't appear in HACS search, add it manually:
 2. Add `https://github.com/raldred/ha-omoda-jaecoo` and select **Integration**.
 3. Find **Omoda / Jaecoo** in HACS, then follow the download, restart and setup steps above.
 
-The stable 0.7.1 release doesn't require enabling beta versions. It includes the conditioning features from the 0.7.0 preview. See the [0.7.1 release notes](docs/releases/0.7.1.md).
+The stable release doesn't require enabling beta versions. See the [0.8.0 release notes](docs/releases/0.8.0.md).
 
 ### Manual installation
 
@@ -79,6 +79,14 @@ Select the vehicle(s) to add, then optionally save the **separate vehicle-contro
 | Door lock, climate running, four doors and boot | Read-only reported states |
 
 HA handles distance/speed conversions and preserves your later entity-unit preferences. API display flags do not change the native kilometre fields.
+
+### Estimated battery energy remaining
+
+To add an estimated kWh reading, open **Settings → Devices & services → Omoda / Jaecoo → Configure** and enter **Usable battery capacity (kWh)** for each vehicle you want to include. Use the usable capacity for your battery, not its gross/advertised capacity. Leave a vehicle's field blank to skip the estimate, or clear it later to stop calculating it.
+
+**Estimated battery energy remaining** is calculated as `usable capacity × battery percentage ÷ 100`. For example, 72% of a configured 60 kWh usable battery is 43.2 kWh. Capacity is set separately for each vehicle; no battery size is assumed or looked up from its model name.
+
+This is an estimate, not a measured API value, and it doesn't adjust for degradation, temperature or battery buffers. It shows unknown when the battery reading is missing, stale or unreliable, and unavailable when the cloud connection fails. It doesn't add any API requests or change polling.
 
 ### Additional entities, disabled by default
 
@@ -218,7 +226,7 @@ The compatibility CI also runs HA 2026.7.1. HACS validation and Hassfest run wit
 Build a release from a committed tree:
 
 ```sh
-python3 scripts/build_release.py --ref HEAD --expected-version 0.7.1
+python3 scripts/build_release.py --ref HEAD --expected-version 0.8.0
 (cd dist && shasum -a 256 -c SHA256SUMS)
 ```
 

@@ -27,6 +27,7 @@ from .api import (
     RateLimitError,
     Vehicle,
 )
+from .battery_capacity import usable_battery_capacity
 from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_AUTH_METHOD,
@@ -46,6 +47,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_SELECTED_VINS,
     CONF_TOKENS,
+    CONF_USABLE_BATTERY_CAPACITIES,
     CONF_VEHICLES,
     DEFAULT_CLIMATE_DURATION,
     DEFAULT_POLL_INTERVAL,
@@ -597,6 +599,39 @@ class OmodaJaecooConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
     """Tune polling and explicitly opt into PIN-protected remote commands."""
 
+    def _capacity_selector(self) -> selector.ObjectSelector:
+        """Use native optional number fields, labelled only by stored car name."""
+        names = {
+            vehicle["vin"]: vehicle.get("name") or "Vehicle"
+            for vehicle in self.config_entry.data.get(CONF_VEHICLES, [])
+        }
+        selected = self.config_entry.data.get(CONF_SELECTED_VINS, [])
+        labels = [names.get(vin, "Vehicle") for vin in selected]
+        return selector.ObjectSelector(
+            selector.ObjectSelectorConfig(
+                fields={
+                    vin: {
+                        "label": (
+                            f"{labels[index]} ({index + 1})"
+                            if labels.count(labels[index]) > 1
+                            else labels[index]
+                        ),
+                        "required": False,
+                        "selector": selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.1,
+                                max=500,
+                                step="any",
+                                mode=selector.NumberSelectorMode.BOX,
+                                unit_of_measurement="kWh",
+                            )
+                        ),
+                    }
+                    for index, vin in enumerate(selected)
+                }
+            )
+        )
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -616,7 +651,18 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                 location = user_input.get(CONF_ENABLE_LOCATION, False)
                 details = user_input.get(CONF_ENABLE_CHARGING_DETAILS, False)
                 depth_target = user_input.get(CONF_CHARGE_DEPTH_IS_TARGET, False)
-                if depth_target and not details:
+                capacities = user_input.get(CONF_USABLE_BATTERY_CAPACITIES, {})
+                selected = self.config_entry.data.get(CONF_SELECTED_VINS, [])
+                if not isinstance(capacities, dict) or any(
+                    vin not in selected
+                    or usable_battery_capacity(
+                        {CONF_USABLE_BATTERY_CAPACITIES: capacities}, vin
+                    )
+                    is None
+                    for vin in capacities
+                ):
+                    errors[CONF_USABLE_BATTERY_CAPACITIES] = "invalid_capacity"
+                elif depth_target and not details:
                     errors["base"] = "charging_details_required"
                 elif enabled and not self.config_entry.data.get(CONF_CONTROL_PIN):
                     errors["base"] = "pin_required"
@@ -639,6 +685,10 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                             CONF_ENABLE_LOCATION: bool(location),
                             CONF_ENABLE_CHARGING_DETAILS: bool(details),
                             CONF_CHARGE_DEPTH_IS_TARGET: bool(depth_target),
+                            CONF_USABLE_BATTERY_CAPACITIES: {
+                                vin: float(capacity)
+                                for vin, capacity in capacities.items()
+                            },
                         },
                     )
             else:
@@ -661,6 +711,14 @@ class OmodaJaecooOptionsFlow(config_entries.OptionsFlow):
                             unit_of_measurement="min",
                         )
                     ),
+                    p.Optional(
+                        CONF_USABLE_BATTERY_CAPACITIES,
+                        description={
+                            "suggested_value": self.config_entry.options.get(
+                                CONF_USABLE_BATTERY_CAPACITIES, {}
+                            )
+                        },
+                    ): self._capacity_selector(),
                     p.Optional(
                         CONF_ENABLE_LOCATION,
                         default=self.config_entry.options.get(
